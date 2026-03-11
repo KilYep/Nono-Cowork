@@ -1,0 +1,34 @@
+[project]
+name = "nono-cowork"
+version = "0.1.0"
+description = "Nono CoWork — A self-hosted AI agent on your VPS, controlled via Telegram / Feishu / Terminal, with Syncthing-based local file sync."
+readme = "README.md"
+requires-python = ">=3.12"
+dependencies = [
+    "arxiv>=2.4.0",
+    "beautifulsoup4>=4.14.3",
+    "ddgs>=9.10.0",
+    "dotenv>=0.9.9",
+    "litellm>=1.63.0",
+    "ipykernel>=7.2.0",
+    "lark-oapi>=1.5.3",
+    "markdownify>=1.2.2",
+    "openai>=2.24.0",
+    "pyTelegramBotAPI>=4.26.0",
+    "questionary>=2.1.1",
+    "requests>=2.32.5",
+    "rich>=14.3.3",
+]
+
+
+[project.scripts]
+agent = "src.agent:main"
+feishu-bot = "src.channels.feishu:main"
+telegram-bot = "src.channels.telegram:main"
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src"]
