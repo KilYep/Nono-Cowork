@@ -15,6 +15,9 @@ wheels/
 # Logs
 logs/
 
+# Runtime data (scheduled tasks, etc.)
+data/
+
 # Editor / IDE
 .idea/
 .vscode/

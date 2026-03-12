@@ -164,6 +164,8 @@ def main():
     import atexit
     from logger import recover_orphaned_logs
     from session import sessions
+    from channels.registry import register_channel
+    from scheduler import scheduler
 
     logging.basicConfig(
         level=logging.INFO,
@@ -174,8 +176,14 @@ def main():
     recover_orphaned_logs()
     # Ensure all sessions are closed on shutdown
     atexit.register(sessions.close_all)
+    atexit.register(scheduler.stop)
 
     channel = TelegramChannel()
+    register_channel(channel)
+
+    # Start scheduler (reloads persisted tasks)
+    scheduler.start()
+
     channel.start()
 
 
