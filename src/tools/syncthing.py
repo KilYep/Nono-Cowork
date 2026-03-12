@@ -3,6 +3,7 @@
 import os
 import time
 import requests
+from tools.registry import tool
 
 
 class SyncthingClient:
@@ -66,6 +67,14 @@ def _get_client():
 
 # ————— Agent tool functions —————
 
+@tool(
+    name="sync_status",
+    description="Check Syncthing synchronization status. Displays all synced folder paths, their sync status, and whether the user's device is online. Call this before operating on synced folders to confirm synchronization is healthy.",
+    parameters={
+        "type": "object",
+        "properties": {},
+    },
+)
 def sync_status() -> str:
     """Check Syncthing sync status.
 
@@ -114,6 +123,25 @@ def sync_status() -> str:
         return f"❌ Failed to get sync status: {e}"
 
 
+@tool(
+    name="sync_wait",
+    description="Wait for file synchronization to complete. Call this after modifying files in a synced folder to ensure changes have been synced to the user's local machine.",
+    parameters={
+        "type": "object",
+        "properties": {
+            "folder_id": {
+                "type": "string",
+                "description": "Synced folder ID, obtainable via sync_status(). Default is 'default'.",
+                "default": "default",
+            },
+            "timeout": {
+                "type": "integer",
+                "description": "Maximum number of seconds to wait. Default is 30.",
+                "default": 30,
+            },
+        },
+    },
+)
 def sync_wait(folder_id: str = "default", timeout: int = 30) -> str:
     """Wait for a folder to finish syncing.
 

@@ -3,16 +3,33 @@ File operation tools — read and edit files.
 """
 
 import os
+from tools.registry import tool
 
 
+@tool(
+    name="read_file",
+    description="Read file contents with optional line range. Use this to view code, config files, READMEs, etc. Output includes line numbers for easy reference.",
+    parameters={
+        "type": "object",
+        "properties": {
+            "path": {
+                "type": "string",
+                "description": "File path (absolute or relative).",
+            },
+            "start_line": {
+                "type": "integer",
+                "description": "Starting line number (1-indexed). If not specified, starts from the beginning.",
+            },
+            "end_line": {
+                "type": "integer",
+                "description": "Ending line number (inclusive). If not specified, reads to the end of the file.",
+            },
+        },
+        "required": ["path"],
+    },
+)
 def read_file(path: str, start_line: int = None, end_line: int = None) -> str:
-    """Read file contents with optional line range.
-
-    Args:
-        path: File path (absolute or relative)
-        start_line: Starting line number (1-indexed), omit to start from beginning
-        end_line: Ending line number (inclusive), omit to read to end
-    """
+    """Read file contents with optional line range."""
     if not os.path.exists(path):
         return f"❌ File not found: {path}"
     if os.path.isdir(path):
@@ -42,14 +59,30 @@ def read_file(path: str, start_line: int = None, end_line: int = None) -> str:
         return f"❌ Failed to read file: {str(ex)}"
 
 
+@tool(
+    name="edit_file",
+    description="Edit a file using search-and-replace. Performs an exact match on old_text and replaces it with new_text. Prefer this tool for modifying files instead of rewriting the entire file with run_command.",
+    parameters={
+        "type": "object",
+        "properties": {
+            "path": {
+                "type": "string",
+                "description": "Path to the file to edit.",
+            },
+            "old_text": {
+                "type": "string",
+                "description": "The original text to replace. Must exactly match the file content, including whitespace and indentation. Use read_file first to view the file, then copy the section you want to modify.",
+            },
+            "new_text": {
+                "type": "string",
+                "description": "The new text to replace the old text with.",
+            },
+        },
+        "required": ["path", "old_text", "new_text"],
+    },
+)
 def edit_file(path: str, old_text: str, new_text: str) -> str:
-    """Edit a file using search and replace. Exact match on old_text, replaced with new_text.
-
-    Args:
-        path: File path
-        old_text: Original text to replace (must exactly match file content, including indentation and newlines)
-        new_text: New text to replace with
-    """
+    """Edit a file using search and replace."""
     if not os.path.exists(path):
         return f"❌ File not found: {path}"
 

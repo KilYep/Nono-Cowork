@@ -7,6 +7,7 @@ import subprocess
 import tempfile
 import threading
 import time
+from tools.registry import tool
 
 
 # ————— Background task management —————
@@ -34,13 +35,7 @@ def _save_output_to_file(lines: list[str], command: str) -> str:
 
 def _summarize_output(output: str, lines: list[str], max_chars: int = DEFAULT_OUTPUT_CHARS,
                       priority: str = "split") -> str:
-    """Truncate output based on priority strategy.
-
-    priority:
-      - "head": return first max_chars characters
-      - "tail": return last max_chars characters
-      - "split": keep half from head and half from tail
-    """
+    """Truncate output based on priority strategy."""
     if len(output) <= max_chars:
         return output
 
@@ -57,21 +52,27 @@ def _summarize_output(output: str, lines: list[str], max_chars: int = DEFAULT_OU
         )
 
 
+@tool(
+    name="run_command",
+    description="Execute a bash command on the Linux server. Can be used for: git clone, installing dependencies (pip install), running Python scripts, viewing file contents (cat/ls/find), creating directories, and any other terminal operations. The command output is returned immediately upon completion; if it does not finish within 120 seconds, a PID is returned and you can use check_command_status to view the result later.\n\nOutput management: When the output exceeds 1000 lines or 100KB, it is automatically saved to a temporary file. A summary and the file path are returned; use read_file to view the full content.",
+    parameters={
+        "type": "object",
+        "properties": {
+            "command": {
+                "type": "string",
+                "description": "The bash command to execute. Supports pipes, redirects, etc. Examples: 'ls -la', 'git clone ...', 'pip install -r requirements.txt'.",
+            },
+            "cwd": {
+                "type": "string",
+                "description": "Working directory for the command. Defaults to the user's home directory.",
+                "default": "~",
+            },
+        },
+        "required": ["command"],
+    },
+)
 def run_command(command: str, cwd: str = "~") -> str:
-    """Execute a bash command on the server and return its output.
-
-    All commands are started in the background, with automatic wait up to 120 seconds.
-    If the command finishes within 120 seconds, output is returned directly;
-    if it exceeds 120 seconds, a PID is returned for later status checking.
-
-    Output management strategy:
-    - Output ≤ 1000 lines and ≤ 100KB: return directly (truncated to 8000 chars)
-    - Output > 1000 lines or > 100KB: auto-save to file, return summary + file path
-
-    Args:
-        command: The bash command to execute
-        cwd: Working directory, defaults to user's home directory
-    """
+    """Execute a bash command on the server and return its output."""
     cwd = os.path.expanduser(cwd)
     WAIT_SECONDS = 120
 
@@ -144,15 +145,34 @@ def run_command(command: str, cwd: str = "~") -> str:
     )
 
 
+@tool(
+    name="check_command_status",
+    description="Check the status and output of a background command. Use this when run_command returns a PID to monitor progress. You can control how many characters to return and whether to prioritize the head or tail of the output. If the output is very large, it is automatically saved to a file that can be read with read_file.",
+    parameters={
+        "type": "object",
+        "properties": {
+            "pid": {
+                "type": "integer",
+                "description": "The process PID, returned by run_command when the command did not finish within the timeout.",
+            },
+            "output_chars": {
+                "type": "integer",
+                "description": "Maximum number of characters of output to return. Default is 8000. Use a smaller value to save context tokens.",
+                "default": 8000,
+            },
+            "priority": {
+                "type": "string",
+                "description": "Output priority: 'head' (show the beginning), 'tail' (show the end, default — best for viewing latest progress and errors), 'split' (show both head and tail, half each).",
+                "enum": ["head", "tail", "split"],
+                "default": "tail",
+            },
+        },
+        "required": ["pid"],
+    },
+)
 def check_command_status(pid: int, output_chars: int = DEFAULT_OUTPUT_CHARS,
                          priority: str = "tail") -> str:
-    """Check the status and output of a background command.
-
-    Args:
-        pid: Process PID (returned by run_command when it times out)
-        output_chars: Max characters of output to return, default 8000.
-        priority: Output priority - "head" (beginning), "tail" (end, default), "split" (both)
-    """
+    """Check the status and output of a background command."""
     info = _bg_processes.get(pid)
     if not info:
         available = ", ".join(str(p) for p in _bg_processes.keys()) or "none"

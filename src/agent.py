@@ -4,7 +4,7 @@ Agent core — the main agent loop and CLI entry point.
 
 import re
 import json
-from tools.tools_decoration import tools, tools_map
+from tools import tools_map, tools_schema
 from config import MODEL, MAX_ROUNDS, CONTEXT_LIMIT
 from prompt import make_system_prompt
 from llm import call_llm, extract_cache_info, update_token_stats, make_empty_token_stats
@@ -49,7 +49,7 @@ def agent_loop(history: list[dict], log_file=None, token_stats: dict = None, on_
         print(f"\n=============== Round {round_num} ===============\n")
 
         try:
-            completion = call_llm(history, tools=tools)
+            completion = call_llm(history, tools=tools_schema)
 
             msg = completion.choices[0].message
 
