@@ -26,7 +26,7 @@ class SessionManager:
         """Get or create a user session."""
         with self._global_lock:
             if user_id not in self._sessions:
-                from agent import make_system_prompt
+                from prompt import make_system_prompt
                 self._sessions[user_id] = {
                     "history": [
                         {"role": "system", "content": make_system_prompt()}

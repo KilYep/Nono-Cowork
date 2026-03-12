@@ -1,4 +1,12 @@
-SYSTEM_PROMPT = """
+"""
+System prompt template + generation logic.
+"""
+
+import os
+import time
+
+
+SYSTEM_PROMPT_TEMPLATE = """
 # Role
 You are a personal office assistant Agent running on a remote server.
 Your workspace is: {workspace}
@@ -43,3 +51,39 @@ Your operations work as if you're on the user's own computer — files you modif
 # Context
 Current time: {time}
 """
+
+
+def _resolve_workspace() -> str:
+    """Resolve the workspace directory path.
+
+    Priority:
+    1. WORKSPACE_DIR env var (explicit config)
+    2. Auto-detect from Syncthing API (first synced folder path)
+    3. Fallback to ~/
+    """
+    # 1. Explicit env var
+    env_workspace = os.getenv("WORKSPACE_DIR", "").strip()
+    if env_workspace:
+        return os.path.expanduser(env_workspace)
+
+    # 2. Auto-detect from Syncthing
+    try:
+        from tools.syncthing import SyncthingClient
+        st = SyncthingClient()
+        folders = st.get_folders()
+        if folders:
+            return folders[0]["path"]
+    except Exception:
+        pass
+
+    # 3. Fallback
+    return os.path.expanduser("~/")
+
+
+def make_system_prompt() -> str:
+    """Generate a system prompt with current timestamp and resolved workspace."""
+    workspace = _resolve_workspace()
+    return SYSTEM_PROMPT_TEMPLATE.format(
+        time=time.strftime("%Y-%m-%d %H:%M:%S", time.localtime()),
+        workspace=workspace,
+    )

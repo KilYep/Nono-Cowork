@@ -1,68 +1,19 @@
-import os
+"""
+Agent core — the main agent loop and CLI entry point.
+"""
+
 import re
 import warnings
 import litellm
-from dotenv import load_dotenv
 import json
-from tools.tools_decoration import tools, tools_map
 import time
-from prompt import SYSTEM_PROMPT as _RAW_SYSTEM_PROMPT
-from logger import create_log_file, close_log_file, log_event, serialize_message, serialize_usage
+from tools.tools_decoration import tools, tools_map
+from config import MODEL, MAX_ROUNDS, CONTEXT_LIMIT, CACHE_CONTROL_PROVIDERS
+from prompt import make_system_prompt
+from logger import create_log_file, log_event, serialize_message, serialize_usage
 
 # Suppress Pydantic serialization warnings triggered by LiteLLM (harmless)
 warnings.filterwarnings("ignore", message="Pydantic serializer warnings")
-
-load_dotenv()
-
-MODEL_POOL = [
-    "dashscope/qwen3.5-plus",
-    "gemini/gemini-2.5-flash",
-    "gemini/gemini-2.5-pro",
-    "anthropic/claude-sonnet-4-20250514",
-    "deepseek/deepseek-chat",
-]
-MAX_ROUNDS = 30
-MODEL = os.getenv("MODEL", "dashscope/qwen3.5-plus")
-CONTEXT_LIMIT = 200_000  # Context window limit (used for usage percentage display)
-
-def _resolve_workspace() -> str:
-    """Resolve the workspace directory path.
-
-    Priority:
-    1. WORKSPACE_DIR env var (explicit config)
-    2. Auto-detect from Syncthing API (first synced folder path)
-    3. Fallback to ~/
-    """
-    # 1. Explicit env var
-    env_workspace = os.getenv("WORKSPACE_DIR", "").strip()
-    if env_workspace:
-        return os.path.expanduser(env_workspace)
-
-    # 2. Auto-detect from Syncthing
-    try:
-        from tools.syncthing import SyncthingClient
-        st = SyncthingClient()
-        folders = st.get_folders()
-        if folders:
-            return folders[0]["path"]
-    except Exception:
-        pass
-
-    # 3. Fallback
-    return os.path.expanduser("~/")
-
-
-def make_system_prompt() -> str:
-    """Generate a system prompt with current timestamp and resolved workspace."""
-    workspace = _resolve_workspace()
-    return _RAW_SYSTEM_PROMPT.format(
-        time=time.strftime("%Y-%m-%d %H:%M:%S", time.localtime()),
-        workspace=workspace,
-    )
-
-
-SYSTEM_PROMPT = make_system_prompt()
-
 
 
 def _print_context_bar(usage):
@@ -92,16 +43,12 @@ def _print_context_bar(usage):
     print(f"\n\n{color}  ⟨{bar}⟩ {pct:.0f}%  context: {fmt(prompt_tokens)} / {fmt(CONTEXT_LIMIT)}\033[0m")
 
 
-# Providers that support cache_control
-_CACHE_CONTROL_PROVIDERS = {"dashscope/", "anthropic/"}
-
-
 def _inject_cache_control(messages: list, model: str) -> list:
     """Inject cache_control markers for models that support prompt caching.
 
     For unsupported models, returns messages unchanged.
     """
-    if not any(model.startswith(p) for p in _CACHE_CONTROL_PROVIDERS):
+    if not any(model.startswith(p) for p in CACHE_CONTROL_PROVIDERS):
         return messages  # Unsupported model, pass through
 
     enhanced = []
@@ -284,6 +231,8 @@ def main():
     # Create log
     log_file = create_log_file()
     log_event(log_file, {"type": "session_start", "model": MODEL})
+
+    SYSTEM_PROMPT = make_system_prompt()
     history:list[dict] = [{"role": "system", "content": SYSTEM_PROMPT}]
     print("🚀 Agent started (Ctrl+C to interrupt, type 'exit' to quit)")
 
@@ -326,7 +275,7 @@ def main():
         f"{'═'*50}\033[0m"
     )
     log_event(log_file, {"type": "session_end", "session_token_stats": session_token_stats})
-    close_log_file(log_file)
+    log_file.close()
 
 
 if __name__ == "__main__":

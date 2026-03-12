@@ -1,5 +1,16 @@
-from tools.tools import (run_command, check_command_status,
-                        web_search, read_webpage, read_file, edit_file)
+"""
+Tool registry — maps tool names to implementations and defines JSON schemas.
+
+All tool imports are centralized here. To add a new tool:
+1. Implement the function in the appropriate module (command.py, file_ops.py, web.py, etc.)
+2. Add an import below
+3. Add the function to tools_map
+4. Add the JSON schema to the tools list
+"""
+
+from tools.command import run_command, check_command_status
+from tools.file_ops import read_file, edit_file
+from tools.web import web_search, read_webpage
 from tools.syncthing import sync_status, sync_wait
 
 
