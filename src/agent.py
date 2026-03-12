@@ -7,7 +7,7 @@ import json
 from tools.tools_decoration import tools, tools_map
 import time
 from prompt import SYSTEM_PROMPT as _RAW_SYSTEM_PROMPT
-from logger import create_log_file, log_event, serialize_message, serialize_usage
+from logger import create_log_file, close_log_file, log_event, serialize_message, serialize_usage
 
 # Suppress Pydantic serialization warnings triggered by LiteLLM (harmless)
 warnings.filterwarnings("ignore", message="Pydantic serializer warnings")
@@ -326,7 +326,7 @@ def main():
         f"{'═'*50}\033[0m"
     )
     log_event(log_file, {"type": "session_end", "session_token_stats": session_token_stats})
-    log_file.close()
+    close_log_file(log_file)
 
 
 if __name__ == "__main__":

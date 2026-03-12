@@ -26,6 +26,33 @@ def log_event(log_file, event: dict):
     log_file.flush()
 
 
+def close_log_file(log_file):
+    """Close the log file and convert JSONL to pretty-printed JSON."""
+    if log_file is None:
+        return
+    log_file.close()
+
+    # Convert JSONL → pretty JSON
+    jsonl_path = Path(log_file.name)
+    if not jsonl_path.exists():
+        return
+
+    json_path = jsonl_path.with_suffix(".json")
+    try:
+        entries = []
+        with open(jsonl_path, "r", encoding="utf-8") as f:
+            for line in f:
+                line = line.strip()
+                if line:
+                    entries.append(json.loads(line))
+        with open(json_path, "w", encoding="utf-8") as f:
+            json.dump(entries, f, indent=2, ensure_ascii=False)
+        jsonl_path.unlink()
+        print(f"📋 Log saved: {json_path}")
+    except Exception as e:
+        print(f"⚠️ Failed to convert JSONL to JSON: {e}")
+
+
 def serialize_message(msg) -> dict:
     """Serialize an OpenAI message object to a JSON-serializable dict."""
     d = {"role": msg.role, "content": msg.content}

@@ -25,7 +25,7 @@ def run_agent_for_message(user_id: str, user_text: str,
         channel_name: Channel name (for logging)
     """
     from agent import agent_loop
-    from logger import create_log_file, log_event
+    from logger import create_log_file, close_log_file, log_event
 
     lock = sessions.get_lock(user_id)
 
@@ -98,7 +98,7 @@ def run_agent_for_message(user_id: str, user_text: str,
 
         finally:
             log_event(log_file, {"type": f"{channel_name}_task_end"})
-            log_file.close()
+            close_log_file(log_file)
 
     finally:
         lock.release()
