@@ -29,6 +29,32 @@ def _get_workspace():
     return os.path.expanduser("~/")
 
 
+_stignore_checked = False
+
+def _ensure_stignore(workspace: str):
+    """Make sure .agent_snapshots is in .stignore so it doesn't sync to user's machine."""
+    global _stignore_checked
+    if _stignore_checked:
+        return
+    _stignore_checked = True
+
+    try:
+        stignore_path = os.path.join(workspace, ".stignore")
+        entry = ".agent_snapshots"
+
+        # Check if already present
+        if os.path.exists(stignore_path):
+            with open(stignore_path, "r") as f:
+                if entry in f.read():
+                    return
+
+        # Append it
+        with open(stignore_path, "a") as f:
+            f.write(f"\n// Agent edit snapshots (auto-added)\n{entry}\n")
+    except Exception:
+        pass
+
+
 def _snapshot_file(file_path: str) -> str | None:
     """Save a backup copy of a file before modifying it.
 
@@ -38,8 +64,11 @@ def _snapshot_file(file_path: str) -> str | None:
         workspace = _get_workspace()
         snap_base = os.path.join(workspace, SNAPSHOT_DIR)
 
-        # Build snapshot path: .agent_snapshots/20240115_103000/relative/path
-        ts = datetime.now().strftime("%Y%m%d_%H%M%S")
+        # Ensure .agent_snapshots is in .stignore (only check once)
+        _ensure_stignore(workspace)
+
+        # Build snapshot path with microseconds to avoid same-second collision
+        ts = datetime.now().strftime("%Y%m%d_%H%M%S_%f")
         try:
             rel = os.path.relpath(file_path, workspace)
         except ValueError:
