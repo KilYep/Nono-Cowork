@@ -3,7 +3,66 @@ File operation tools — read and edit files.
 """
 
 import os
+import shutil
+from datetime import datetime
 from tools.registry import tool
+
+
+# ————— Snapshot: auto-backup before Agent edits —————
+SNAPSHOT_DIR = ".agent_snapshots"
+MAX_SNAPSHOTS = 50  # Keep at most this many snapshot folders
+
+
+def _get_workspace():
+    """Get the workspace root (same logic as prompt.py)."""
+    ws = os.getenv("WORKSPACE_DIR", "").strip()
+    if ws:
+        return os.path.expanduser(ws)
+    try:
+        from tools.syncthing import SyncthingClient
+        st = SyncthingClient()
+        folders = st.get_folders()
+        if folders:
+            return folders[0]["path"]
+    except Exception:
+        pass
+    return os.path.expanduser("~/")
+
+
+def _snapshot_file(file_path: str) -> str | None:
+    """Save a backup copy of a file before modifying it.
+
+    Returns the snapshot path, or None if snapshot failed (non-fatal).
+    """
+    try:
+        workspace = _get_workspace()
+        snap_base = os.path.join(workspace, SNAPSHOT_DIR)
+
+        # Build snapshot path: .agent_snapshots/20240115_103000/relative/path
+        ts = datetime.now().strftime("%Y%m%d_%H%M%S")
+        try:
+            rel = os.path.relpath(file_path, workspace)
+        except ValueError:
+            rel = os.path.basename(file_path)
+
+        snap_path = os.path.join(snap_base, ts, rel)
+        os.makedirs(os.path.dirname(snap_path), exist_ok=True)
+        shutil.copy2(file_path, snap_path)
+
+        # Cleanup old snapshots if too many
+        try:
+            snap_dirs = sorted(os.listdir(snap_base))
+            # Filter out non-directories
+            snap_dirs = [d for d in snap_dirs if os.path.isdir(os.path.join(snap_base, d))]
+            while len(snap_dirs) > MAX_SNAPSHOTS:
+                oldest = snap_dirs.pop(0)
+                shutil.rmtree(os.path.join(snap_base, oldest), ignore_errors=True)
+        except Exception:
+            pass
+
+        return snap_path
+    except Exception:
+        return None  # Snapshot failure should never block the edit
 
 
 @tool(
@@ -61,7 +120,7 @@ def read_file(path: str, start_line: int = None, end_line: int = None) -> str:
 
 @tool(
     name="edit_file",
-    description="Edit a file using search-and-replace. Performs an exact match on old_text and replaces it with new_text. Prefer this tool for modifying files instead of rewriting the entire file with run_command.",
+    description="Edit a file using search-and-replace. Performs an exact match on old_text and replaces it with new_text. Prefer this tool for modifying files instead of rewriting the entire file with run_command. A backup of the original file is automatically saved before each edit.",
     parameters={
         "type": "object",
         "properties": {
@@ -116,6 +175,9 @@ def edit_file(path: str, old_text: str, new_text: str) -> str:
                 f"Include more surrounding context in old_text to uniquely identify the target."
             )
 
+        # Auto-snapshot before modifying
+        _snapshot_file(path)
+
         # Unique match, perform replacement
         new_content = content.replace(old_text, new_text, 1)
         with open(path, "w", encoding="utf-8") as f:
@@ -127,3 +189,59 @@ def edit_file(path: str, old_text: str, new_text: str) -> str:
 
     except Exception as ex:
         return f"❌ Edit failed: {str(ex)}"
+
+
+@tool(
+    name="list_snapshots",
+    description="List file snapshots created by the Agent before edits. Use this when the user wants to undo an Agent edit or recover a file the Agent accidentally broke. Each snapshot shows the timestamp and original file path.",
+    parameters={
+        "type": "object",
+        "properties": {
+            "file_filter": {
+                "type": "string",
+                "description": "Optional: only show snapshots containing this filename or path fragment.",
+                "default": "",
+            },
+        },
+    },
+)
+def list_snapshots(file_filter: str = "") -> str:
+    """List available file snapshots from before Agent edits."""
+    try:
+        workspace = _get_workspace()
+        snap_base = os.path.join(workspace, SNAPSHOT_DIR)
+
+        if not os.path.exists(snap_base):
+            return "📂 No snapshots yet. Snapshots are created automatically when edit_file modifies a file."
+
+        entries = []
+        for ts_dir in sorted(os.listdir(snap_base), reverse=True):
+            ts_path = os.path.join(snap_base, ts_dir)
+            if not os.path.isdir(ts_path):
+                continue
+            for root, _, files in os.walk(ts_path):
+                for fname in files:
+                    full = os.path.join(root, fname)
+                    rel = os.path.relpath(full, ts_path)
+                    if file_filter and file_filter not in rel:
+                        continue
+                    size = os.path.getsize(full)
+                    size_str = f"{size / 1024:.1f}KB" if size >= 1024 else f"{size}B"
+                    # Parse timestamp from dir name
+                    try:
+                        ts_display = datetime.strptime(ts_dir, "%Y%m%d_%H%M%S").strftime("%Y-%m-%d %H:%M:%S")
+                    except ValueError:
+                        ts_display = ts_dir
+                    entries.append(f"  📄 {rel}\n     ⏱️ {ts_display} | Size: {size_str}\n     Path: {full}")
+
+        if not entries:
+            return "📂 No snapshots found" + (f" matching '{file_filter}'" if file_filter else "") + "."
+
+        result = f"📂 Agent edit snapshots (newest first):\n\n"
+        result += "\n".join(entries)
+        result += "\n\nTo restore: use run_command(\"cp <snapshot_path> <original_path>\") to copy it back."
+        return result
+
+    except Exception as e:
+        return f"❌ Failed to list snapshots: {e}"
+

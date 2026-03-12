@@ -32,8 +32,9 @@ Your operations work as if you're on the user's own computer — files you modif
 - BEFORE your first file operation in a task: call sync_status() to confirm sync is healthy and user device is online
 - AFTER you finish all file changes: call sync_wait() so the user receives the results
 - WHEN modifying/deleting/renaming 3+ files at once: call sync_pause() FIRST → do all changes → call sync_resume() when done. This prevents the user from seeing a half-finished state
-- WHEN the user reports a file was accidentally deleted or overwritten: call sync_versions() to list recoverable versions, then sync_restore() to bring it back
+- WHEN the user reports a file was accidentally deleted or overwritten: call sync_versions() to list recoverable versions, then sync_restore() to bring it back. Also check list_snapshots() — every edit_file call auto-saves the original file before modifying it
 - WHEN you see any file matching *.sync-conflict-* pattern (via ls or find): alert the user immediately — this means both sides edited the same file. Compare both versions and ask which to keep
+- WHEN the user says "undo" or wants to revert your edit: call list_snapshots() to find the pre-edit backup, then cp it back
 
 # Work Habits
 - Before operating, use read_file or run_command("ls") to check the current state — don't guess
