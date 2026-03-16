@@ -1,5 +1,5 @@
 """
-File operation tools — read and edit files.
+File operation tools — read, write, and edit files.
 """
 
 import os
@@ -218,6 +218,66 @@ def edit_file(path: str, old_text: str, new_text: str) -> str:
 
     except Exception as ex:
         return f"❌ Edit failed: {str(ex)}"
+
+
+@tool(
+    name="write_file",
+    description="Create a new file or overwrite an existing file with the given content. Use this to create new files (scripts, configs, documents, etc.). If the file already exists, a backup is automatically saved before overwriting. Parent directories are created automatically if they don't exist. For modifying specific parts of an existing file, prefer edit_file instead.",
+    parameters={
+        "type": "object",
+        "properties": {
+            "path": {
+                "type": "string",
+                "description": "File path (absolute or relative to workspace). Parent directories will be created if needed.",
+            },
+            "content": {
+                "type": "string",
+                "description": "The full content to write to the file.",
+            },
+            "overwrite": {
+                "type": "boolean",
+                "description": "Whether to overwrite if the file already exists. Defaults to false. If false and the file exists, the operation will fail with an error.",
+                "default": False,
+            },
+        },
+        "required": ["path", "content"],
+    },
+)
+def write_file(path: str, content: str, overwrite: bool = False) -> str:
+    """Create a new file or overwrite an existing file."""
+    # Track whether file existed before writing
+    file_existed = os.path.exists(path)
+
+    # Check if file already exists
+    if file_existed:
+        if os.path.isdir(path):
+            return f"❌ Path is a directory, not a file: {path}"
+        if not overwrite:
+            return (
+                f"❌ File already exists: {path}\n"
+                f"Set overwrite=true to replace it, or use edit_file to modify specific parts."
+            )
+        # Auto-snapshot before overwriting
+        _snapshot_file(path)
+
+    try:
+        # Auto-create parent directories
+        parent = os.path.dirname(path)
+        if parent:
+            os.makedirs(parent, exist_ok=True)
+
+        with open(path, "w", encoding="utf-8") as f:
+            f.write(content)
+
+        lines = content.count("\n") + (1 if content and not content.endswith("\n") else 0)
+        size = len(content.encode("utf-8"))
+        size_str = f"{size / 1024:.1f}KB" if size >= 1024 else f"{size}B"
+        action = "overwritten" if file_existed else "created"
+
+        return f"✅ File {action}: {path} ({lines} lines, {size_str})"
+
+    except Exception as ex:
+        return f"❌ Failed to write file: {str(ex)}"
 
 
 @tool(
