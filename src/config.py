@@ -16,6 +16,13 @@ MODEL_POOL = [
     "deepseek/deepseek-chat",
 ]
 MODEL = os.getenv("MODEL", "dashscope/qwen3.5-plus")
+API_BASE = os.getenv("API_BASE", "").strip()   # Custom OpenAI-compatible endpoint
+API_KEY = os.getenv("API_KEY", "").strip()      # API key for the custom endpoint
+
+# Auto-prefix: if API_BASE is set and MODEL has no provider prefix, treat as openai-compatible
+if API_BASE and "/" not in MODEL:
+    MODEL = f"openai/{MODEL}"
+
 MAX_ROUNDS = 30
 CONTEXT_LIMIT = 200_000  # Context window limit (used for usage percentage display)
 

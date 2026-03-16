@@ -4,7 +4,7 @@ LLM client — wraps LiteLLM calls, cache control injection, and token stats tra
 
 import warnings
 import litellm
-from config import MODEL, CACHE_CONTROL_PROVIDERS
+from config import MODEL, API_BASE, API_KEY, CACHE_CONTROL_PROVIDERS
 
 # Suppress Pydantic serialization warnings triggered by LiteLLM (harmless)
 warnings.filterwarnings("ignore", message="Pydantic serializer warnings")
@@ -57,6 +57,10 @@ def call_llm(messages: list, model: str = None, tools: list = None):
     if tools:
         kwargs["tools"] = tools
         kwargs["tool_choice"] = "auto"
+    if API_BASE:
+        kwargs["api_base"] = API_BASE
+    if API_KEY:
+        kwargs["api_key"] = API_KEY
 
     return litellm.completion(**kwargs)
 
