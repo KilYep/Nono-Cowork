@@ -55,6 +55,8 @@ class SessionManager:
                     "log_file": log_file,
                     "created_at": time.time(),
                     "last_active": time.time(),
+                    "stop_flag": threading.Event(),   # For /stop
+                    "model_override": None,           # For /model
                 }
             session = self._sessions[user_id]
             session["last_active"] = time.time()
@@ -65,6 +67,10 @@ class SessionManager:
         with self._global_lock:
             if user_id in self._sessions:
                 session = self._sessions.pop(user_id)
+                # Signal stop to any running agent
+                stop_flag = session.get("stop_flag")
+                if stop_flag:
+                    stop_flag.set()
                 # Close the session's log file
                 log_file = session.get("log_file")
                 if log_file:
@@ -75,6 +81,60 @@ class SessionManager:
                         "session_token_stats": session.get("token_stats"),
                     })
                     close_log_file(log_file)
+
+    def request_stop(self, user_id: str) -> bool:
+        """Signal the running agent to stop. Returns True if a session exists."""
+        with self._global_lock:
+            session = self._sessions.get(user_id)
+            if session:
+                session["stop_flag"].set()
+                return True
+            return False
+
+    def is_stopped(self, user_id: str) -> bool:
+        """Check if stop has been requested for this user."""
+        with self._global_lock:
+            session = self._sessions.get(user_id)
+            if session:
+                return session["stop_flag"].is_set()
+            return False
+
+    def clear_stop(self, user_id: str):
+        """Clear the stop flag (called at the start of each agent run)."""
+        with self._global_lock:
+            session = self._sessions.get(user_id)
+            if session:
+                session["stop_flag"].clear()
+
+    def set_model(self, user_id: str, model: str | None):
+        """Set or clear a per-session model override."""
+        with self._global_lock:
+            session = self._sessions.get(user_id)
+            if session:
+                session["model_override"] = model
+
+    def get_model(self, user_id: str) -> str | None:
+        """Get the per-session model override (None = use default)."""
+        with self._global_lock:
+            session = self._sessions.get(user_id)
+            if session:
+                return session.get("model_override")
+            return None
+
+    def get_status(self, user_id: str) -> dict | None:
+        """Get session status info for /status command."""
+        with self._global_lock:
+            session = self._sessions.get(user_id)
+            if not session:
+                return None
+            return {
+                "token_stats": dict(session["token_stats"]),
+                "history_len": len(session["history"]),
+                "created_at": session["created_at"],
+                "last_active": session["last_active"],
+                "model_override": session.get("model_override"),
+                "is_running": self._locks.get(user_id, threading.Lock()).locked(),
+            }
 
     def close_all(self):
         """Close all sessions and their log files (for shutdown)."""

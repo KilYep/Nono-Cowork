@@ -74,8 +74,14 @@ def _print_context_bar(usage):
     print(f"\n\n{color}  ⟨{bar}⟩ {pct:.0f}%  context: {fmt(prompt_tokens)} / {fmt(CONTEXT_LIMIT)}\033[0m")
 
 
-def agent_loop(history: list[dict], log_file=None, token_stats: dict = None, on_event=None):
-    """Core Agent loop."""
+def agent_loop(history: list[dict], log_file=None, token_stats: dict = None,
+               on_event=None, check_stop=None, model_override: str = None):
+    """Core Agent loop.
+
+    Args:
+        check_stop: Optional callable that returns True if the user requested a stop.
+        model_override: Optional model name to use instead of the default.
+    """
 
     # Initialize / reuse token stats
     if token_stats is None:
@@ -83,7 +89,16 @@ def agent_loop(history: list[dict], log_file=None, token_stats: dict = None, on_
 
     last_prompt_tokens = 0  # Track for compression decisions
 
+    active_model = model_override or MODEL
+    _stopped = False
+
     for round_num in range(1, MAX_ROUNDS + 1):
+        # ── Check for user-requested stop ──
+        if _stopped or (check_stop and check_stop()):
+            print("\n🛑 Stop requested by user")
+            log_event(log_file, {"type": "stopped_by_user", "round": round_num})
+            break
+
         print(f"\n=============== Round {round_num} ===============\n")
 
         try:
@@ -100,7 +115,7 @@ def agent_loop(history: list[dict], log_file=None, token_stats: dict = None, on_
                         "new_messages": len(history),
                     })
 
-            completion = call_llm(history, tools=tools_schema)
+            completion = call_llm(history, model=active_model, tools=tools_schema)
 
             msg = completion.choices[0].message
 
@@ -114,7 +129,7 @@ def agent_loop(history: list[dict], log_file=None, token_stats: dict = None, on_
             log_event(log_file, {
                 "type": "llm_response",
                 "round": round_num,
-                "model": MODEL,
+                "model": active_model,
                 "message": serialize_message(msg),
                 "usage": serialize_usage(completion.usage),
                 "cache": cache_info,
@@ -163,6 +178,23 @@ def agent_loop(history: list[dict], log_file=None, token_stats: dict = None, on_
 
             # Has tool calls → execute each one
             for tc in msg.tool_calls:
+                # Check for stop between tool calls
+                if check_stop and check_stop():
+                    print("\n🛑 Stop requested — aborting remaining tool calls")
+                    # Fill in dummy results for unanswered tool calls
+                    answered_ids = {item.get("tool_call_id") for item in history
+                                    if isinstance(item, dict) and item.get("role") == "tool"}
+                    for remaining_tc in msg.tool_calls:
+                        if remaining_tc.id not in answered_ids:
+                            history.append({
+                                "role": "tool",
+                                "tool_call_id": remaining_tc.id,
+                                "content": "[Stopped by user]",
+                            })
+                    log_event(log_file, {"type": "stopped_by_user", "round": round_num})
+                    _stopped = True
+                    break
+
                 tool_name = tc.function.name
                 args = json.loads(tc.function.arguments)
                 print(f"Tool call >>>\n {tool_name}({args})\n")

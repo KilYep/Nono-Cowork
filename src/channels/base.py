@@ -8,29 +8,174 @@ To add a new channel:
 """
 from abc import ABC, abstractmethod
 import threading
+import time
 import logging
 from agent_runner import run_agent_for_message
 from session import sessions
+from config import MODEL, MODEL_POOL, CONTEXT_LIMIT
 
 logger = logging.getLogger("channel")
 
 
-# Special commands shared across all channels
-RESET_COMMANDS = {"/reset", "/new", "reset"}
-HELP_COMMANDS = {"/help", "help"}
+# ═══════════════════════════════════════════
+#  Slash command registry
+# ═══════════════════════════════════════════
 
-HELP_TEXT = (
-    "🤖 VPS Agent Help\n\n"
-    "Send text commands directly and I'll execute them on the server.\n\n"
-    "Example commands:\n"
-    "• Check server disk usage\n"
-    "• Write a Python script for...\n"
-    "• Search for the latest info on xxx\n\n"
-    "Special commands:\n"
-    "• /reset - Reset session (clear context)\n"
-    "• /help - Show this help message\n"
-)
+def _cmd_reset(channel, user_id: str, args: str):
+    """Reset the current session and start fresh."""
+    sessions.reset(user_id)
+    channel.send_status(user_id, "🔄 Session reset. You can start a new conversation.")
 
+
+def _cmd_help(channel, user_id: str, args: str):
+    """Show help message with all available commands."""
+    lines = [
+        "🤖 **VPS Agent Help**",
+        "",
+        "Send text directly — I'll handle it on the server.",
+        "",
+        "📝  Examples:",
+        "• Check server disk usage",
+        "• Write a Python script for...",
+        "• Search for the latest info on xxx",
+        "",
+        "⚡  Commands:",
+    ]
+    for name, (_, desc) in sorted(SLASH_COMMANDS.items()):
+        lines.append(f"• `/{name}` — {desc}")
+    channel.send_status(user_id, "\n".join(lines))
+
+
+def _cmd_status(channel, user_id: str, args: str):
+    """Show current session status: model, tokens, context usage."""
+    info = sessions.get_status(user_id)
+    if not info:
+        channel.send_status(user_id, "ℹ️ No active session. Send a message to start one.")
+        return
+
+    stats = info["token_stats"]
+    model = info["model_override"] or MODEL
+    elapsed = time.time() - info["created_at"]
+    mins = int(elapsed // 60)
+
+    # Context usage
+    pt = stats["total_prompt_tokens"]
+    pct = min(pt / CONTEXT_LIMIT * 100, 100) if CONTEXT_LIMIT else 0
+    filled = int(12 * pct / 100)
+    bar = "█" * filled + "░" * (12 - filled)
+
+    def fmt(n):
+        return f"{n/1000:.1f}k" if n >= 1000 else str(n)
+
+    lines = [
+        "📊 **Session Status**",
+        "",
+        f"🤖 Model: `{model}`",
+        f"⏱️ Duration: {mins}m",
+        f"💬 Messages: {info['history_len']}",
+        f"📡 API calls: {stats['total_api_calls']}",
+        "",
+        f"⟨{bar}⟩ {pct:.0f}%  context",
+        f"Prompt: {fmt(pt)} / {fmt(CONTEXT_LIMIT)}  |  "
+        f"Completion: {fmt(stats['total_completion_tokens'])}  |  "
+        f"Total: {fmt(stats['total_tokens'])}",
+    ]
+    if stats["total_cached_tokens"]:
+        lines.append(f"Cached: {fmt(stats['total_cached_tokens'])}")
+    if info["is_running"]:
+        lines.append("\n🔄 Agent is currently running...")
+
+    channel.send_status(user_id, "\n".join(lines))
+
+
+def _cmd_stop(channel, user_id: str, args: str):
+    """Stop the currently running agent task."""
+    if sessions.request_stop(user_id):
+        channel.send_status(user_id, "🛑 Stop requested. The agent will halt after the current step.")
+    else:
+        channel.send_status(user_id, "ℹ️ No active session to stop.")
+
+
+def _cmd_compact(channel, user_id: str, args: str):
+    """Manually compress the session context to free up space."""
+    from context.compressor import compress_history
+
+    session = sessions.get_or_create(user_id)
+    lock = sessions.get_lock(user_id)
+
+    if not lock.acquire(blocking=False):
+        channel.send_status(user_id, "⏳ Agent is running. Wait for it to finish before compacting.")
+        return
+
+    try:
+        history = session["history"]
+        old_len = len(history)
+
+        if old_len <= 3:
+            channel.send_status(user_id, "ℹ️ Not enough context to compress.")
+            return
+
+        # Force compression regardless of threshold
+        new_history = compress_history(history, CONTEXT_LIMIT)
+
+        if len(new_history) < old_len:
+            session["history"] = new_history
+            channel.send_status(
+                user_id,
+                f"📦 Context compressed: {old_len} → {len(new_history)} messages. "
+                f"Freed ~{old_len - len(new_history)} messages."
+            )
+        else:
+            channel.send_status(user_id, "ℹ️ Context is already compact — nothing to compress.")
+    finally:
+        lock.release()
+
+
+def _cmd_model(channel, user_id: str, args: str):
+    """View or switch the LLM model for this session."""
+    args = args.strip()
+
+    if not args:
+        # Show current model and reference list
+        current = sessions.get_model(user_id) or MODEL
+        lines = [
+            f"🤖 Current model: `{current}`",
+            f"Default: `{MODEL}`",
+            "",
+            "Reference (configured in config.py):",
+        ]
+        for m in MODEL_POOL:
+            lines.append(f"  • `{m}`")
+        lines.append(f"\nUsage: `/model <model_name>`")
+        lines.append(f"Restore default: `/model reset`")
+        channel.send_status(user_id, "\n".join(lines))
+        return
+
+    # Reset to default
+    if args.lower() in ("reset", "default"):
+        sessions.set_model(user_id, None)
+        channel.send_status(user_id, f"🤖 Model reset to default: `{MODEL}`")
+        return
+
+    # Set model by name (user provides the exact model identifier)
+    sessions.set_model(user_id, args)
+    channel.send_status(user_id, f"🤖 Model switched to: `{args}`")
+
+
+# ── Command table: name → (handler_func, description) ──
+SLASH_COMMANDS = {
+    "help":    (_cmd_help,    "Show this help message"),
+    "reset":   (_cmd_reset,   "Reset session (clear context)"),
+    "status":  (_cmd_status,  "View session status & token usage"),
+    "stop":    (_cmd_stop,    "Stop the current running task"),
+    "compact": (_cmd_compact, "Compress context to free up space"),
+    "model":   (_cmd_model,   "View or switch the LLM model"),
+}
+
+
+# ═══════════════════════════════════════════
+#  Channel base class
+# ═══════════════════════════════════════════
 
 class Channel(ABC):
     """IM channel abstract base class"""
@@ -72,15 +217,22 @@ class Channel(ABC):
 
         logger.info(f"[{self.name}] Message from {user_id}: {user_text}")
 
-        # Special commands
-        if user_text.lower() in RESET_COMMANDS:
-            sessions.reset(user_id)
-            self.send_status(user_id, "🔄 Session reset. You can start a new conversation.")
-            return
+        # ── Slash command dispatch ──
+        if user_text.startswith("/"):
+            parts = user_text[1:].split(None, 1)
+            cmd_name = parts[0].lower()
+            cmd_args = parts[1] if len(parts) > 1 else ""
 
-        if user_text.lower() in HELP_COMMANDS:
-            self.send_status(user_id, HELP_TEXT)
-            return
+            handler = SLASH_COMMANDS.get(cmd_name)
+            if handler:
+                handler[0](self, user_id, cmd_args)
+                return
+            # Also support bare "reset" / "help" without slash
+        elif user_text.lower() in ("reset", "help"):
+            handler = SLASH_COMMANDS.get(user_text.lower())
+            if handler:
+                handler[0](self, user_id, "")
+                return
 
         # "Processing" notification
         self.send_status(user_id, "💭 Thinking...")

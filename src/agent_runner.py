@@ -38,11 +38,15 @@ def run_agent_for_message(user_id: str, user_text: str,
     # Set execution context so tools can access user_id and channel_name
     set_context(user_id=user_id, channel_name=channel_name)
 
+    # Clear any previous stop flag before starting
+    sessions.clear_stop(user_id)
+
     try:
         session = sessions.get_or_create(user_id)
         history = session["history"]
         token_stats = session["token_stats"]
         log_file = session["log_file"]  # Session-level log file
+        model_override = session.get("model_override")  # Per-session model
 
         # Append user message
         history.append({"role": "user", "content": user_text})
@@ -68,13 +72,23 @@ def run_agent_for_message(user_id: str, user_text: str,
                 if round_num not in narrated_rounds:
                     status_func(f"🔧 Running: {evt['tool_name']}...")
 
+        # Stop checker: agent_loop calls this to check if /stop was requested
+        def check_stop():
+            return sessions.is_stopped(user_id)
+
         # Run Agent
         try:
             updated_history, updated_stats = agent_loop(
-                history, log_file, token_stats, on_event=on_event
+                history, log_file, token_stats,
+                on_event=on_event,
+                check_stop=check_stop,
+                model_override=model_override,
             )
             session["history"] = updated_history
             session["token_stats"] = updated_stats
+
+            # Check if we were stopped
+            was_stopped = sessions.is_stopped(user_id)
 
             # Extract final reply
             final_reply = ""
@@ -95,7 +109,9 @@ def run_agent_for_message(user_id: str, user_text: str,
                             final_reply = msg.content
                             break
 
-            if final_reply:
+            if was_stopped and not final_reply:
+                reply_func("🛑 Task stopped by user.")
+            elif final_reply:
                 reply_func(final_reply)
             else:
                 reply_func("✅ Task completed (no text output)")
