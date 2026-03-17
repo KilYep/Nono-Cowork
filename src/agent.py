@@ -107,6 +107,11 @@ def agent_loop(history: list[dict], log_file=None, token_stats: dict = None,
                 old_len = len(history)
                 history = compress_history(history, last_prompt_tokens)
                 if len(history) < old_len:
+                    # Rebuild system prompt: pick up new skills, memory, timestamp
+                    # (prompt cache is already invalidated by compression, so this is free)
+                    from prompt import make_system_prompt
+                    history[0] = {"role": "system", "content": make_system_prompt()}
+
                     print(f"\033[35m  📦 Context compressed: {old_len} → {len(history)} messages\033[0m")
                     log_event(log_file, {
                         "type": "context_compressed",

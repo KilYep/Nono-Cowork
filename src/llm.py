@@ -57,9 +57,16 @@ def call_llm(messages: list, model: str = None, tools: list = None):
     if tools:
         kwargs["tools"] = tools
         kwargs["tool_choice"] = "auto"
-    if API_BASE:
+
+    # Only pass custom API_BASE/API_KEY for models that use the custom endpoint.
+    # Providers with their own env vars (GEMINI_API_KEY, ANTHROPIC_API_KEY, etc.)
+    # should NOT use the custom endpoint — litellm resolves them automatically.
+    _SELF_AUTH_PROVIDERS = {"gemini", "anthropic", "deepseek"}
+    _provider = model.split("/")[0] if "/" in model else ""
+    _use_custom_endpoint = API_BASE and _provider not in _SELF_AUTH_PROVIDERS
+    if _use_custom_endpoint:
         kwargs["api_base"] = API_BASE
-    if API_KEY:
+    if _use_custom_endpoint and API_KEY:
         kwargs["api_key"] = API_KEY
 
     return litellm.completion(**kwargs)
