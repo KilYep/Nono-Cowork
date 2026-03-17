@@ -13,6 +13,33 @@ from context.spill import spill_tool_output
 from context.compressor import compress_history, needs_compression
 
 
+# ── Pretty terminal output helpers ──────────────────────────────────────────
+
+def _fmt_tool_args(args: dict, max_val_len: int = 80) -> str:
+    """Format tool arguments for terminal display, truncating long values."""
+    parts = []
+    for k, v in args.items():
+        v_str = str(v)
+        if len(v_str) > max_val_len:
+            v_str = v_str[:max_val_len] + "…"
+        parts.append(f"    {k}: {v_str}")
+    return "\n".join(parts)
+
+
+def _print_tool_call(tool_name: str, args: dict):
+    """Print a styled tool call header."""
+    print(f"\033[36m  🔧 {tool_name}\033[0m")
+    if args:
+        print(f"\033[90m{_fmt_tool_args(args)}\033[0m")
+    print()
+
+
+def _print_tool_result(result: str, max_len: int = 500):
+    """Print tool result in dimmed text, truncated if too long."""
+    display = result if len(result) <= max_len else result[:max_len] + f"\n    … ({len(result)} chars total)"
+    print(f"\033[90m  ↳ {display}\033[0m\n")
+
+
 def format_usage_summary(token_stats: dict, usage=None) -> str:
     """Format a concise usage summary for IM channels.
 
@@ -202,7 +229,7 @@ def agent_loop(history: list[dict], log_file=None, token_stats: dict = None,
 
                 tool_name = tc.function.name
                 args = json.loads(tc.function.arguments)
-                print(f"Tool call >>>\n {tool_name}({args})\n")
+                _print_tool_call(tool_name, args)
 
                 # Notify external: tool call started
                 if on_event:
@@ -217,7 +244,7 @@ def agent_loop(history: list[dict], log_file=None, token_stats: dict = None,
                 # ── Spill large tool outputs to file ──
                 tool_result = spill_tool_output(tool_result, tool_name=tool_name)
 
-                print(f"\033[90mTool result >>>\n {tool_result}\033[0m\n")
+                _print_tool_result(tool_result)
 
                 # Notify external: tool call result
                 if on_event:

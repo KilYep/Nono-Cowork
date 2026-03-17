@@ -102,7 +102,9 @@ def format_skills_prompt_section(skills: list[dict]) -> str:
     lines = [
         "# Skills",
         "You have specialized skills with detailed instructions for certain tasks.",
-        "When a task matches a skill below, use read_file to read its SKILL.md BEFORE starting work.",
+        "Skills are NOT tools — they are instruction documents. Do NOT call them as functions.",
+        "When a task matches a skill below, use the read_file tool to read its SKILL.md BEFORE starting work,",
+        "then follow the instructions inside.",
         "",
     ]
 

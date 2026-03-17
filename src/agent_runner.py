@@ -70,7 +70,7 @@ def run_agent_for_message(user_id: str, user_text: str,
             elif evt["type"] == "tool_call" and status_func:
                 # Only show generic tool status if no narration was sent this round
                 if round_num not in narrated_rounds:
-                    status_func(f"🔧 Running: {evt['tool_name']}...")
+                    status_func(f"🔧 {evt['tool_name']}")
 
         # Stop checker: agent_loop calls this to check if /stop was requested
         def check_stop():

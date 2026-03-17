@@ -78,10 +78,12 @@ def _section_capabilities() -> str:
 
 def _section_sync_rules(workspace: str) -> str:
     return f"""\
-# Sync Rules (MUST follow)
+# Sync Rules (ONLY for files in {workspace})
+These rules ONLY apply when you create, modify, or delete files inside {workspace}.
+Do NOT call sync tools for operations outside {workspace} (e.g., installing skills, modifying project code).
 - Files in {workspace} auto-sync to the user's machine via Syncthing (2-3 seconds delay)
-- BEFORE your first file operation in a task: call sync_status() to confirm sync is healthy and user device is online
-- AFTER you finish all file changes: call sync_wait() so the user receives the results
+- BEFORE your first file operation in {workspace}: call sync_status() to confirm sync is healthy and user device is online
+- AFTER you finish all file changes in {workspace}: call sync_wait() so the user receives the results
 - WHEN modifying/deleting/renaming 3+ files at once: call sync_pause() FIRST → do all changes → call sync_resume() when done. This prevents the user from seeing a half-finished state
 - WHEN the user reports a file was accidentally deleted or overwritten: call sync_versions() to list recoverable versions, then sync_restore() to bring it back. Also check list_snapshots() — every edit_file call auto-saves the original file before modifying it
 - WHEN you see any file matching *.sync-conflict-* pattern (via ls or find): alert the user immediately — this means both sides edited the same file. Compare both versions and ask which to keep

@@ -58,8 +58,8 @@ def _cmd_status(channel, user_id: str, args: str):
     elapsed = time.time() - info["created_at"]
     mins = int(elapsed // 60)
 
-    # Context usage
-    pt = stats["total_prompt_tokens"]
+    # Context usage — based on last API call (= current context size)
+    pt = stats.get("last_prompt_tokens", 0)
     pct = min(pt / CONTEXT_LIMIT * 100, 100) if CONTEXT_LIMIT else 0
     filled = int(12 * pct / 100)
     bar = "█" * filled + "░" * (12 - filled)
@@ -75,10 +75,9 @@ def _cmd_status(channel, user_id: str, args: str):
         f"💬 Messages: {info['history_len']}",
         f"📡 API calls: {stats['total_api_calls']}",
         "",
-        f"⟨{bar}⟩ {pct:.0f}%  context",
-        f"Prompt: {fmt(pt)} / {fmt(CONTEXT_LIMIT)}  |  "
-        f"Completion: {fmt(stats['total_completion_tokens'])}  |  "
-        f"Total: {fmt(stats['total_tokens'])}",
+        f"⟨{bar}⟩ {pct:.0f}%  context: {fmt(pt)} / {fmt(CONTEXT_LIMIT)}",
+        f"Total consumed: {fmt(stats['total_tokens'])}  "
+        f"(prompt: {fmt(stats['total_prompt_tokens'])} + completion: {fmt(stats['total_completion_tokens'])})",
     ]
     if stats["total_cached_tokens"]:
         lines.append(f"Cached: {fmt(stats['total_cached_tokens'])}")

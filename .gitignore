@@ -28,8 +28,7 @@ data/
 src/context/design.md
 src/memory/design.md
 
-# Third-party proprietary skills (local use only)
-skills/pdf/
-skills/xlsx/
-skills/docx/
-skills/pptx/
+# Skills — ignore all except built-in ones
+skills/*/
+!skills/skill-creator/
+!skills/skill-finder/
