@@ -42,3 +42,7 @@ TOOL_OUTPUT_PREVIEW_CHARS = 800     # Chars to show as preview when output is sp
 # ── Memory ──
 MEMORY_FILE = os.path.join(os.path.dirname(os.path.dirname(__file__)), "data", "memory.md")
 MEMORY_MAX_INJECT_CHARS = 2000      # Max chars of memory to inject into system prompt
+
+# ── Composio (optional) ──
+COMPOSIO_API_KEY = os.getenv("COMPOSIO_API_KEY", "").strip()
+COMPOSIO_USER_ID = os.getenv("COMPOSIO_USER_ID", "default").strip()

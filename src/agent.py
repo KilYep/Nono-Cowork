@@ -5,6 +5,7 @@ Agent core — the main agent loop and CLI entry point.
 import re
 import json
 from tools import tools_map, tools_schema
+from tools import composio_tools
 from config import MODEL, MAX_ROUNDS, CONTEXT_LIMIT
 from prompt import make_system_prompt
 from llm import call_llm, extract_cache_info, update_token_stats, make_empty_token_stats
@@ -128,7 +129,12 @@ def format_usage_summary(token_stats: dict, usage=None) -> str:
 
 
 def _print_context_bar(usage):
-    """Print a Cursor-style context usage progress bar."""
+    """Print a context window usage progress bar.
+
+    Shows the current context size (= prompt_tokens of the last API call),
+    which equals the total history being sent to the LLM right now.
+    This grows as the conversation progresses.
+    """
     if not usage:
         return
     prompt_tokens = usage.prompt_tokens or 0
@@ -142,16 +148,14 @@ def _print_context_bar(usage):
     else:
         color = "\033[31m"   # Red
 
-    # Progress bar
     bar_width = 20
     filled = int(bar_width * pct / 100)
     bar = "█" * filled + "░" * (bar_width - filled)
 
-    # Format token count (e.g. 128k / 200k)
     def fmt(n):
         return f"{n/1000:.0f}k" if n >= 1000 else str(n)
 
-    print(f"\n\n{color}  ⟨{bar}⟩ {pct:.0f}%  context: {fmt(prompt_tokens)} / {fmt(CONTEXT_LIMIT)}\033[0m")
+    print(f"\n\n{color}  ⟨{bar}⟩ {pct:.0f}%  {fmt(prompt_tokens)} / {fmt(CONTEXT_LIMIT)}\033[0m")
 
 
 def agent_loop(history: list[dict], log_file=None, token_stats: dict = None,
@@ -306,11 +310,19 @@ def agent_loop(history: list[dict], log_file=None, token_stats: dict = None,
                     else:
                         filtered_args = args
                     tool_result = str(func(**filtered_args))
+                elif composio_tools.is_composio_tool(tool_name):
+                    # Composio meta-tool: execute via Composio SDK (with result cleaning)
+                    tool_result = composio_tools.execute(tool_name, args)
                 else:
                     tool_result = f"Error: unknown tool {tool_name}"
 
                 # ── Spill large tool outputs to file ──
-                tool_result = spill_tool_output(tool_result, tool_name=tool_name)
+                # Skip spill in two cases:
+                # 1. Composio tools: already cleaned by clean_tool_result
+                # 2. read_file: has its own line-range params; spilling would cause
+                #    recursive loops (LLM reads spill file → output spilled again)
+                if not composio_tools.is_composio_tool(tool_name) and tool_name != "read_file":
+                    tool_result = spill_tool_output(tool_result, tool_name=tool_name)
 
                 _print_tool_result(tool_result)
 
@@ -399,13 +411,20 @@ def main():
             break
 
     # ── Session summary ──
+    # total_prompt_tokens = sum of prompt_tokens from ALL API calls (billing total)
+    # last_prompt_tokens  = prompt_tokens of the last API call (= current context size)
+    def _fmt(n):
+        return f"{n/1000:.1f}k" if n >= 1000 else str(n)
+
+    last_ctx = session_token_stats.get('last_prompt_tokens', 0)
     print(
         f"\n\033[35m{'═'*50}\n"
-        f"📊 Session Token Usage\n"
-        f"   Prompt:     {session_token_stats['total_prompt_tokens']}\n"
-        f"   Completion: {session_token_stats['total_completion_tokens']}\n"
-        f"   Total:      {session_token_stats['total_tokens']}\n"
-        f"   Cached:     {session_token_stats['total_cached_tokens']}\n"
+        f"📊 Session Summary\n"
+        f"   Context:    {_fmt(last_ctx)} / {_fmt(CONTEXT_LIMIT)}\n"
+        f"   Billed:     {_fmt(session_token_stats['total_tokens'])} "
+        f"(prompt {_fmt(session_token_stats['total_prompt_tokens'])} "
+        f"+ completion {_fmt(session_token_stats['total_completion_tokens'])})\n"
+        f"   Cached:     {_fmt(session_token_stats['total_cached_tokens'])}\n"
         f"   API Calls:  {session_token_stats['total_api_calls']}\n"
         f"{'═'*50}\033[0m"
     )

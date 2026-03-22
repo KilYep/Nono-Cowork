@@ -1,5 +1,5 @@
 version = 1
-revision = 3
+revision = 2
 requires-python = ">=3.12"
 resolution-markers = [
     "python_full_version >= '3.13'",
@@ -419,6 +419,53 @@ source = { registry = "https://pypi.org/simple" }
 sdist = { url = "https://files.pythonhosted.org/packages/4c/13/7d740c5849255756bc17888787313b61fd38a0a8304fc4f073dfc46122aa/comm-0.2.3.tar.gz", hash = "sha256:2dc8048c10962d55d7ad693be1e7045d891b7ce8d999c97963a5e3e99c055971", size = 6319, upload-time = "2025-07-25T14:02:04.452Z" }
 wheels = [
     { url = "https://files.pythonhosted.org/packages/60/97/891a0971e1e4a8c5d2b20bbe0e524dc04548d2307fee33cdeba148fd4fc7/comm-0.2.3-py3-none-any.whl", hash = "sha256:c615d91d75f7f04f095b30d1c1711babd43bdc6419c1be9886a85f2f4e489417", size = 7294, upload-time = "2025-07-25T14:02:02.896Z" },
+]
+
+[[package]]
+name = "composio"
+version = "0.11.3"
+source = { registry = "https://pypi.org/simple" }
+dependencies = [
+    { name = "composio-client" },
+    { name = "json-schema-to-pydantic" },
+    { name = "openai" },
+    { name = "pydantic" },
+    { name = "pysher" },
+    { name = "typing-extensions" },
+]
+sdist = { url = "https://files.pythonhosted.org/packages/e9/cd/cb35df4d220e3954a0759fb50c66f48f0d71e0bc1ec69ca83899a485e11b/composio-0.11.3.tar.gz", hash = "sha256:e2e335ad9393043b0a1ae61bb2c3bc1a5a69feea6169b4f5a86d088ba015e539", size = 153277, upload-time = "2026-03-13T11:11:38.497Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/ad/bc/dcd74c13495f213467e8da63153c2207d53f58e813d2676eeab7dcf4bbbb/composio-0.11.3-py3-none-any.whl", hash = "sha256:131a423b928583f87716b6570b87a66fab7222e0b7fcad5237498b1e504d7d40", size = 101945, upload-time = "2026-03-13T11:11:24.768Z" },
+]
+
+[[package]]
+name = "composio-client"
+version = "1.28.0"
+source = { registry = "https://pypi.org/simple" }
+dependencies = [
+    { name = "anyio" },
+    { name = "distro" },
+    { name = "httpx" },
+    { name = "pydantic" },
+    { name = "sniffio" },
+    { name = "typing-extensions" },
+]
+sdist = { url = "https://files.pythonhosted.org/packages/99/45/5f063d364bef7879252c3dab517a42a9f3fdf1ad8943895f5b718c27fd31/composio_client-1.28.0.tar.gz", hash = "sha256:787869c1fba543f07aa26d1f64e5f37e4909465b37af24ec4b5a01fd73115045", size = 209918, upload-time = "2026-03-09T04:34:49.137Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/4e/8c/901f59aaf8674f8bda6da1fbae087eb5209f11a9b26f6118c2be49702d0c/composio_client-1.28.0-py3-none-any.whl", hash = "sha256:8f037d8e66b3bfb3aa701b4d26c8a242d22638031b938a363874ebc41e4710ee", size = 239827, upload-time = "2026-03-09T04:34:47.591Z" },
+]
+
+[[package]]
+name = "composio-openai"
+version = "0.11.3"
+source = { registry = "https://pypi.org/simple" }
+dependencies = [
+    { name = "composio" },
+    { name = "openai" },
+]
+sdist = { url = "https://files.pythonhosted.org/packages/af/2d/08a96a9eda7da4da4ae6cf86e4fd70a721a2cc8d9d52e9f1e79bfc93df4a/composio_openai-0.11.3.tar.gz", hash = "sha256:3c18080026206de8838733b47c133acc7fd0ed534cf8c2347e1c31e3ea0a46f9", size = 2734, upload-time = "2026-03-13T11:11:46.309Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/83/2c/c082c59d12883b8cd5fa4c830ad8608462a060dbd68ba6e4063c8dd812b2/composio_openai-0.11.3-py3-none-any.whl", hash = "sha256:dcdd35a5971b66e93a0cc22573e596504c7ea81522aa0df580d3e9fedda8de0f", size = 2996, upload-time = "2026-03-13T11:11:36.595Z" },
 ]
 
 [[package]]
@@ -977,6 +1024,18 @@ wheels = [
 ]
 
 [[package]]
+name = "json-schema-to-pydantic"
+version = "0.4.11"
+source = { registry = "https://pypi.org/simple" }
+dependencies = [
+    { name = "pydantic" },
+]
+sdist = { url = "https://files.pythonhosted.org/packages/60/d8/423895b918706c80db1cee679c13fbe810200b9a9d9a9442c7a58d35c3f2/json_schema_to_pydantic-0.4.11.tar.gz", hash = "sha256:35448ed711a28dd33396b095c8492939b4925aa30eb31942e9b8e08d04279465", size = 56597, upload-time = "2026-03-09T20:53:55.692Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/f3/64/7cfeb8c6d2a5e73e0f8d732032aa62be9a7724c04beb461d677de0b4beb3/json_schema_to_pydantic-0.4.11-py3-none-any.whl", hash = "sha256:da2ccc39d070ee03dbcf0517d16720e3e33f7aa8d61257ace09af8c51bd46348", size = 17842, upload-time = "2026-03-09T20:53:54.576Z" },
+]
+
+[[package]]
 name = "jsonschema"
 version = "4.26.0"
 source = { registry = "https://pypi.org/simple" }
@@ -1375,6 +1434,8 @@ dependencies = [
     { name = "apscheduler" },
     { name = "arxiv" },
     { name = "beautifulsoup4" },
+    { name = "composio" },
+    { name = "composio-openai" },
     { name = "ddgs" },
     { name = "dotenv" },
     { name = "ipykernel" },
@@ -1396,6 +1457,8 @@ requires-dist = [
     { name = "apscheduler", specifier = ">=3.11.2" },
     { name = "arxiv", specifier = ">=2.4.0" },
     { name = "beautifulsoup4", specifier = ">=4.14.3" },
+    { name = "composio", specifier = ">=0.11.0,<1.0.0" },
+    { name = "composio-openai", specifier = ">=0.11.0,<1.0.0" },
     { name = "ddgs", specifier = ">=9.10.0" },
     { name = "dotenv", specifier = ">=0.9.9" },
     { name = "ipykernel", specifier = ">=7.2.0" },
@@ -1811,6 +1874,16 @@ wheels = [
     { url = "https://files.pythonhosted.org/packages/f5/fb/a3f1f8813f6e93c65d1f7ebca6530a889f1ae109229b537f7a617b2aab57/pymupdf-1.27.2-cp310-abi3-win_amd64.whl", hash = "sha256:acdfdb7329882246545a0f6bc85f91739e2773ed81f9301c1687cffb826470f3", size = 19237944, upload-time = "2026-03-10T12:38:45.603Z" },
     { url = "https://files.pythonhosted.org/packages/e6/a4/e9257882f0569a21d51207a58f7586a799e76dc6b4008029a04f2329194c/pymupdf-1.27.2-cp314-cp314t-manylinux_2_28_x86_64.whl", hash = "sha256:261c916915cede4c546559810d3210277f86f31b52dd3de138f1e12d95a4c6b6", size = 24985149, upload-time = "2026-03-10T12:39:02.636Z" },
 ]
+
+[[package]]
+name = "pysher"
+version = "1.0.8"
+source = { registry = "https://pypi.org/simple" }
+dependencies = [
+    { name = "requests" },
+    { name = "websocket-client" },
+]
+sdist = { url = "https://files.pythonhosted.org/packages/12/a0/d0638470df605ce266991fb04f74c69ab1bed3b90ac3838e9c3c8b69b66a/Pysher-1.0.8.tar.gz", hash = "sha256:7849c56032b208e49df67d7bd8d49029a69042ab0bb45b2ed59fa08f11ac5988", size = 9071, upload-time = "2022-10-10T13:41:09.936Z" }
 
 [[package]]
 name = "pytelegrambotapi"
@@ -2433,6 +2506,15 @@ source = { registry = "https://pypi.org/simple" }
 sdist = { url = "https://files.pythonhosted.org/packages/35/a2/8e3becb46433538a38726c948d3399905a4c7cabd0df578ede5dc51f0ec2/wcwidth-0.6.0.tar.gz", hash = "sha256:cdc4e4262d6ef9a1a57e018384cbeb1208d8abbc64176027e2c2455c81313159", size = 159684, upload-time = "2026-02-06T19:19:40.919Z" }
 wheels = [
     { url = "https://files.pythonhosted.org/packages/68/5a/199c59e0a824a3db2b89c5d2dade7ab5f9624dbf6448dc291b46d5ec94d3/wcwidth-0.6.0-py3-none-any.whl", hash = "sha256:1a3a1e510b553315f8e146c54764f4fb6264ffad731b3d78088cdb1478ffbdad", size = 94189, upload-time = "2026-02-06T19:19:39.646Z" },
+]
+
+[[package]]
+name = "websocket-client"
+version = "1.9.0"
+source = { registry = "https://pypi.org/simple" }
+sdist = { url = "https://files.pythonhosted.org/packages/2c/41/aa4bf9664e4cda14c3b39865b12251e8e7d239f4cd0e3cc1b6c2ccde25c1/websocket_client-1.9.0.tar.gz", hash = "sha256:9e813624b6eb619999a97dc7958469217c3176312b3a16a4bd1bc7e08a46ec98", size = 70576, upload-time = "2025-10-07T21:16:36.495Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/34/db/b10e48aa8fff7407e67470363eac595018441cf32d5e1001567a7aeba5d2/websocket_client-1.9.0-py3-none-any.whl", hash = "sha256:af248a825037ef591efbf6ed20cc5faa03d3b47b9e5a2230a529eeee1c1fc3ef", size = 82616, upload-time = "2025-10-07T21:16:34.951Z" },
 ]
 
 [[package]]

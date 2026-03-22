@@ -15,3 +15,10 @@ from tools.registry import get_tools_map, get_tools_schema
 
 tools_map = get_tools_map()
 tools_schema = get_tools_schema()
+
+# ── Composio integration (optional) ──
+from tools import composio_tools
+if composio_tools.is_enabled():
+    composio_tools.init()
+    tools_schema = tools_schema + composio_tools.get_tools_schema()
+

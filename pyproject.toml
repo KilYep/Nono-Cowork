@@ -7,6 +7,8 @@ requires-python = ">=3.12"
 dependencies = [
     "arxiv>=2.4.0",
     "beautifulsoup4>=4.14.3",
+    "composio>=0.11.0,<1.0.0",
+    "composio-openai>=0.11.0,<1.0.0",
     "ddgs>=9.10.0",
     "dotenv>=0.9.9",
     "litellm>=1.63.0",
