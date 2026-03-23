@@ -43,10 +43,12 @@ def composio_list_triggers(toolkit: str) -> str:
     name="composio_create_trigger",
     description=(
         "Create a new trigger to monitor events from a connected app. "
-        "The trigger will automatically send events to the agent when they occur. "
-        "First use composio_list_triggers to find the right trigger slug, "
-        "then create it with any required configuration. "
-        "Example: create a GMAIL_NEW_GMAIL_MESSAGE trigger to get notified of new emails."
+        "The trigger will automatically process events using a dedicated agent "
+        "with the system prompt you provide in agent_prompt. "
+        "IMPORTANT: You MUST write a detailed agent_prompt that tells the processing agent "
+        "exactly how to handle events. Include rules for filtering (use [SKIP] for events "
+        "to ignore), formatting, and any specific actions. "
+        "First use composio_list_triggers to find the right trigger slug."
     ),
     parameters={
         "type": "object",
@@ -55,19 +57,29 @@ def composio_list_triggers(toolkit: str) -> str:
                 "type": "string",
                 "description": "The trigger type slug (e.g., 'GMAIL_NEW_GMAIL_MESSAGE', 'GITHUB_COMMIT_EVENT').",
             },
+            "agent_prompt": {
+                "type": "string",
+                "description": (
+                    "System prompt for the event-processing agent. Write clear rules for: "
+                    "1) When to notify the user vs skip ([SKIP]). "
+                    "2) How to format the notification. "
+                    "3) Any specific processing logic. "
+                    "This prompt will be used every time an event is received."
+                ),
+            },
             "trigger_config": {
                 "type": "object",
                 "description": "Optional configuration for the trigger. Use composio_list_triggers to see required config fields.",
             },
         },
-        "required": ["trigger_slug"],
+        "required": ["trigger_slug", "agent_prompt"],
     },
 )
-def composio_create_trigger(trigger_slug: str, trigger_config: dict = None) -> str:
+def composio_create_trigger(trigger_slug: str, agent_prompt: str, trigger_config: dict = None) -> str:
     if not _is_enabled():
         return '{"error": "Composio is not enabled. Set COMPOSIO_API_KEY in .env."}'
     from composio_triggers import create_trigger
-    return create_trigger(trigger_slug, trigger_config)
+    return create_trigger(trigger_slug, agent_prompt, trigger_config)
 
 
 @tool(

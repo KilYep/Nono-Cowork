@@ -3,11 +3,15 @@ Composio Triggers — event-driven workflows via Composio trigger subscriptions.
 
 This module provides:
   1. A background WebSocket listener that receives trigger events from Composio
-  2. Agent tools for creating/managing triggers (exposed to the LLM)
-  3. Event dispatch to the user via their active IM channel
+  2. Trigger recipe storage (trigger_slug + agent_prompt, persisted to JSON)
+  3. Disposable agent sessions for processing events (one-shot, no history kept)
+  4. Agent tools for creating/managing triggers (exposed to the LLM)
 
 Architecture:
-  Composio Cloud → WebSocket → TriggerListener → agent_runner → IM Channel
+  Composio Cloud → WebSocket → TriggerListener
+    → load trigger recipe (agent_prompt)
+    → disposable agent_loop (one-shot)
+    → if not [SKIP]: channel.send_reply() to user
 
 The listener starts automatically when Composio is enabled and runs in a
 background daemon thread.
@@ -15,6 +19,7 @@ background daemon thread.
 
 import json
 import logging
+import os
 import threading
 import time
 
@@ -22,10 +27,52 @@ from config import COMPOSIO_API_KEY, COMPOSIO_USER_ID
 
 logger = logging.getLogger("composio.triggers")
 
+# ── Trigger recipe storage ──
+_TRIGGER_STORE_PATH = os.path.join(
+    os.path.dirname(os.path.dirname(__file__)), "data", "trigger_recipes.json"
+)
+
+
+def _load_recipes() -> dict:
+    """Load trigger recipes from disk. Returns {trigger_id: recipe_dict}."""
+    if not os.path.exists(_TRIGGER_STORE_PATH):
+        return {}
+    try:
+        with open(_TRIGGER_STORE_PATH, "r") as f:
+            return json.load(f)
+    except Exception as e:
+        logger.warning("Failed to load trigger recipes: %s", e)
+        return {}
+
+
+def _save_recipes(recipes: dict):
+    """Persist trigger recipes to disk."""
+    os.makedirs(os.path.dirname(_TRIGGER_STORE_PATH), exist_ok=True)
+    with open(_TRIGGER_STORE_PATH, "w") as f:
+        json.dump(recipes, f, indent=2, ensure_ascii=False)
+
+
+def _find_recipe_by_trigger_id(trigger_id: str) -> dict | None:
+    """Look up a trigger recipe by its Composio trigger_id."""
+    recipes = _load_recipes()
+    return recipes.get(trigger_id)
+
+
+def _find_recipe_by_slug(trigger_slug: str) -> dict | None:
+    """Look up a trigger recipe by its trigger_slug (returns first match)."""
+    recipes = _load_recipes()
+    for recipe in recipes.values():
+        if recipe.get("trigger_slug") == trigger_slug:
+            return recipe
+    return None
+
+
 # ── Module-level state ──
 _listener_thread = None
 _subscription = None
 _running = False
+_processed_events: set[str] = set()  # dedup: event UUIDs already processed
+_processing_lock = threading.Lock()  # serialize trigger processing (one at a time)
 
 
 def is_enabled() -> bool:
@@ -73,18 +120,120 @@ def stop_listener():
     logger.info("Composio trigger listener stopped")
 
 
+def _patch_trigger_subscription(subscription):
+    """Monkey-patch SDK's _parse_payload to handle missing 'nanoId' in metadata.
+
+    Composio SDK 0.11.3 expects metadata.nanoId but some triggers (e.g. Gmail)
+    don't include it, causing a KeyError that silently drops the event.
+    """
+    import typing as t
+
+    original_parse = subscription._parse_payload
+
+    def _patched_parse_payload(event: str):
+        try:
+            return original_parse(event)
+        except (KeyError, TypeError) as e:
+            logger.warning("SDK _parse_payload failed (%s), using fallback parser", e)
+            try:
+                data = json.loads(event)
+
+                # Detect format: V3 has top-level 'type' field, V1 has 'appName'
+                if "type" in data and "data" in data:
+                    # V3 format: {id, timestamp, type, metadata: {trigger_slug, trigger_id, user_id, ...}, data: {...}}
+                    metadata = data.get("metadata", {})
+                    trigger_slug = metadata.get("trigger_slug", "unknown")
+                    trigger_id = metadata.get("trigger_id", "")
+                    user_id = metadata.get("user_id", COMPOSIO_USER_ID)
+                    event_payload = data.get("data", {})
+
+                    logger.info("V3 event parsed: slug=%s, trigger_id=%s", trigger_slug, trigger_id)
+                else:
+                    # V1 format: {appName, payload, originalPayload, metadata: {nanoId, triggerName, connection, ...}}
+                    metadata = data.get("metadata", {})
+                    connection = metadata.get("connection", {})
+                    trigger_slug = metadata.get("triggerName", "unknown")
+                    trigger_id = metadata.get("nanoId", metadata.get("id", ""))
+                    user_id = connection.get("clientUniqueUserId", COMPOSIO_USER_ID)
+                    event_payload = data.get("payload", {})
+
+                    logger.info("V1 event parsed: slug=%s, trigger_id=%s", trigger_slug, trigger_id)
+
+                return t.cast(dict, {
+                    "id": trigger_id,
+                    "uuid": data.get("id", ""),
+                    "user_id": user_id,
+                    "toolkit_slug": data.get("appName", ""),
+                    "trigger_slug": trigger_slug,
+                    "metadata": {
+                        "id": trigger_id,
+                        "trigger_slug": trigger_slug,
+                        "connected_account": {
+                            "id": metadata.get("connected_account_id", ""),
+                            "uuid": "",
+                            "auth_config_id": metadata.get("auth_config_id", ""),
+                            "auth_config_uuid": "",
+                            "user_id": user_id,
+                            "status": "ACTIVE",
+                        },
+                    },
+                    "payload": event_payload,
+                    "original_payload": data.get("originalPayload", event_payload),
+                })
+            except Exception as e2:
+                logger.error("Fallback parser also failed: %s", e2)
+                return None
+
+    subscription._parse_payload = _patched_parse_payload
+    logger.info("Patched SDK _parse_payload for nanoId compatibility")
+
+
 def _listener_loop():
-    """Main listener loop with auto-reconnect."""
+    """Main listener loop with auto-reconnect.
+
+    IMPORTANT: old subscription must be fully stopped before creating a new one,
+    otherwise we get duplicate WebSocket connections that process the same event
+    multiple times (each spawning a subagent → memory explosion).
+    """
     global _subscription
 
     while _running:
+        # ── Ensure previous subscription is fully dead ──
+        if _subscription:
+            try:
+                _subscription.stop()
+            except Exception:
+                pass
+            _subscription = None
+
         try:
             from composio import Composio
             client = Composio()
             _subscription = client.triggers.subscribe(timeout=60.0)
 
+            # Patch SDK bug: missing nanoId in some trigger events
+            _patch_trigger_subscription(_subscription)
+
             @_subscription.handle()
             def _on_trigger_event(data):
+                event_id = data.get("uuid", "") if isinstance(data, dict) else ""
+                slug = data.get("trigger_slug", "?") if isinstance(data, dict) else "?"
+
+                # Dedup: skip if we've already processed this event
+                if event_id and event_id in _processed_events:
+                    logger.debug("Skipping duplicate event: %s", event_id)
+                    return
+
+                if event_id:
+                    _processed_events.add(event_id)
+                    # Limit dedup set size to prevent memory leak
+                    if len(_processed_events) > 200:
+                        # Remove oldest entries (set doesn't keep order, just clear half)
+                        to_remove = list(_processed_events)[:100]
+                        for item in to_remove:
+                            _processed_events.discard(item)
+
+                logger.info("Trigger event received: slug=%s, id=%s", slug, event_id)
                 _handle_trigger_event(data)
 
             logger.info("Trigger WebSocket connected, waiting for events...")
@@ -97,90 +246,124 @@ def _listener_loop():
             time.sleep(10)
 
 
+# ══════════════════════════════════════════════
+# Event processing — disposable agent session
+# ══════════════════════════════════════════════
+
+SKIP_MARKER = "[SKIP]"
+
+# Default system prompt for triggers without a custom agent_prompt
+_DEFAULT_TRIGGER_PROMPT = (
+    "You received a trigger event from an external service. "
+    "Summarize the event concisely and notify the user. "
+    "If the event is trivial or not worth notifying, respond with exactly [SKIP]."
+)
+
+
 def _handle_trigger_event(data):
-    """Process an incoming trigger event and dispatch to the user's IM channel."""
-    try:
-        # Extract event metadata
-        # The SDK subscription passes the trigger payload directly
-        if isinstance(data, dict):
-            metadata = data.get("metadata", {})
-            event_data = data.get("data", data)
-            trigger_slug = metadata.get("trigger_slug", "unknown_trigger")
-            user_id = metadata.get("user_id", COMPOSIO_USER_ID)
-        else:
-            # Handle raw data format
-            event_data = data
-            trigger_slug = "unknown_trigger"
-            user_id = COMPOSIO_USER_ID
+    """Process an incoming trigger event using a disposable agent session.
 
-        logger.info(
-            "Trigger event received: slug=%s, user=%s",
-            trigger_slug, user_id,
-        )
-
-        # Build a message for the agent
-        event_summary = json.dumps(event_data, ensure_ascii=False, default=str)
-        if len(event_summary) > 2000:
-            event_summary = event_summary[:2000] + "... (truncated)"
-
-        user_message = (
-            f"[Composio Trigger Event: {trigger_slug}]\n"
-            f"An event was triggered from an external service. Here's the data:\n"
-            f"```json\n{event_summary}\n```\n"
-            f"Please process this event and notify me about it."
-        )
-
-        # Dispatch through agent_runner to the user's active channel
-        _dispatch_to_user(user_id, user_message)
-
-    except Exception as e:
-        logger.error("Error handling trigger event: %s", e, exc_info=True)
-
-
-def _dispatch_to_user(user_id: str, message: str):
-    """Dispatch a trigger event message to the user via their active IM channel.
-
-    Tries to find the user's most recent channel and run the agent for them.
-    Falls back to logging if no channel is available.
+    Events are processed ONE AT A TIME (serialized via lock) to prevent
+    multiple Gemini CLI processes from running simultaneously and
+    causing OOM on memory-constrained servers.
     """
-    from channels.registry import list_channels, get_channel
-    from session import sessions
+    # Acquire lock — if another event is being processed, this blocks
+    with _processing_lock:
+        try:
+            if isinstance(data, dict):
+                trigger_slug = data.get("trigger_slug", "unknown_trigger")
+                trigger_id = data.get("id", "")
+                user_id = data.get("user_id", COMPOSIO_USER_ID)
+                event_data = data.get("payload") or data.get("original_payload") or data
+            else:
+                trigger_slug = "unknown_trigger"
+                trigger_id = ""
+                user_id = COMPOSIO_USER_ID
+                event_data = data
 
-    # Find a channel to reply through:
-    # 1. If the user has an active session, we know which channel they used
-    # 2. Otherwise, use the first registered channel
-    channel = None
-    channel_names = list_channels()
+            logger.info(
+                "Processing trigger event: slug=%s, trigger_id=%s, user=%s",
+                trigger_slug, trigger_id, user_id,
+            )
 
-    if not channel_names:
-        logger.warning(
-            "No IM channels registered. Cannot deliver trigger event to user %s. "
-            "Event message: %s", user_id, message[:200],
-        )
-        return
+            # Look up the trigger recipe (agent_prompt)
+            recipe = _find_recipe_by_trigger_id(trigger_id) or _find_recipe_by_slug(trigger_slug)
+            agent_prompt = (recipe or {}).get("agent_prompt") or _DEFAULT_TRIGGER_PROMPT
+            recipe_user_id = (recipe or {}).get("user_id") or user_id
 
-    # Use the first available channel
-    channel = get_channel(channel_names[0])
-    if not channel:
-        logger.warning("Channel %s not found in registry", channel_names[0])
-        return
+            # Process the event in a disposable agent session
+            result = _run_disposable_agent(agent_prompt, event_data, trigger_slug)
 
-    # Run the agent for this trigger event, same as if the user sent a message
-    from agent_runner import run_agent_for_message
+            if result is None:
+                logger.info("Trigger event skipped (slug=%s)", trigger_slug)
+                return
 
-    def reply_func(text):
-        channel.send_reply(user_id, text)
+            # Deliver result to user
+            _deliver_to_user(recipe_user_id, result)
 
-    def status_func(text):
-        channel.send_status(user_id, text)
+        except Exception as e:
+            logger.error("Error handling trigger event: %s", e, exc_info=True)
 
-    # Run in a separate thread to not block the listener
-    thread = threading.Thread(
-        target=run_agent_for_message,
-        args=(user_id, message, reply_func, status_func, f"{channel.name}:trigger"),
-        daemon=True,
+
+def _run_disposable_agent(agent_prompt: str, event_data, trigger_slug: str) -> str | None:
+    """Run a one-shot agent to process a trigger event via the subagent framework.
+
+    Uses the subagent provider system (auto-selects gemini-cli > self agent_loop).
+    The session is fully disposable — no history is kept.
+
+    Returns the agent's response, or None if the agent decided to skip.
+    """
+    from subagent import get_provider
+
+    # Format event data as the task
+    event_str = json.dumps(event_data, ensure_ascii=False, default=str)
+    if len(event_str) > 4000:
+        event_str = event_str[:4000] + "... (truncated)"
+
+    task = (
+        f"[Trigger Event: {trigger_slug}]\n"
+        f"```json\n{event_str}\n```"
     )
-    thread.start()
+
+    try:
+        # Force 'self' provider — Gemini CLI (Node.js) OOMs on low-memory servers.
+        # The self provider uses our Python agent_loop, which is lighter (~50MB)
+        # and more reliable for these short one-shot tasks.
+        provider = get_provider(name="self")
+        logger.info(
+            "Processing trigger %s via subagent provider: %s",
+            trigger_slug, provider.name,
+        )
+        result = provider.run(task=task, system_prompt=agent_prompt)
+    except Exception as e:
+        logger.error("Subagent error for trigger %s: %s", trigger_slug, e)
+        return None
+
+    # Check for SKIP
+    if not result or SKIP_MARKER in result:
+        return None
+
+    return result
+
+
+def _deliver_to_user(user_id: str, message: str):
+    """Send the processed trigger result directly to the user's IM channel."""
+    try:
+        from channels.registry import list_channels, get_channel
+
+        channel_names = list_channels()
+        if not channel_names:
+            logger.warning("No IM channels registered. Cannot deliver trigger result.")
+            return
+
+        channel = get_channel(channel_names[0])
+        if channel:
+            channel.send_reply(user_id, message)
+            logger.info("Trigger result delivered to %s via %s", user_id, channel.name)
+        else:
+            logger.warning("Channel %s not found", channel_names[0])
+    except Exception as e:
+        logger.warning("Failed to deliver trigger result: %s", e)
 
 
 # ══════════════════════════════════════════════
@@ -188,14 +371,7 @@ def _dispatch_to_user(user_id: str, message: str):
 # ══════════════════════════════════════════════
 
 def list_available_triggers(toolkit: str) -> str:
-    """List available trigger types for a toolkit.
-
-    Args:
-        toolkit: The toolkit slug (e.g. 'github', 'gmail', 'slack').
-
-    Returns:
-        JSON string with available trigger types.
-    """
+    """List available trigger types for a toolkit."""
     if not is_enabled():
         return json.dumps({"error": "Composio not enabled"})
 
@@ -216,15 +392,18 @@ def list_available_triggers(toolkit: str) -> str:
         return json.dumps({"error": str(e)})
 
 
-def create_trigger(trigger_slug: str, trigger_config: dict = None) -> str:
-    """Create a new trigger instance.
+def create_trigger(trigger_slug: str, agent_prompt: str = None,
+                   trigger_config: dict = None) -> str:
+    """Create a new trigger instance with an optional agent_prompt.
+
+    The agent_prompt is the system prompt for the disposable agent that
+    processes each event. It should be written by the main agent based on
+    the user's natural language instructions.
 
     Args:
         trigger_slug: The trigger type slug (e.g. 'GMAIL_NEW_GMAIL_MESSAGE').
+        agent_prompt: System prompt for the event-processing agent.
         trigger_config: Optional configuration dict for the trigger.
-
-    Returns:
-        JSON string with the created trigger info.
     """
     if not is_enabled():
         return json.dumps({"error": "Composio not enabled"})
@@ -232,10 +411,6 @@ def create_trigger(trigger_slug: str, trigger_config: dict = None) -> str:
     try:
         from composio import Composio
         client = Composio()
-
-        # First, check what config is required
-        trigger_type = client.triggers.get_type(trigger_slug)
-        required_config = getattr(trigger_type, 'config', {})
 
         trigger = client.triggers.create(
             slug=trigger_slug,
@@ -244,12 +419,33 @@ def create_trigger(trigger_slug: str, trigger_config: dict = None) -> str:
         )
 
         trigger_id = getattr(trigger, 'trigger_id', str(trigger))
+
+        # Persist the recipe (trigger_slug + agent_prompt)
+        # so _handle_trigger_event can look it up later
+        from context import get_context
+        ctx = get_context()
+        current_user_id = ctx.get("user_id", COMPOSIO_USER_ID)
+
+        recipes = _load_recipes()
+        recipes[trigger_id] = {
+            "trigger_id": trigger_id,
+            "trigger_slug": trigger_slug,
+            "agent_prompt": agent_prompt or _DEFAULT_TRIGGER_PROMPT,
+            "trigger_config": trigger_config,
+            "user_id": current_user_id,
+            "created_at": time.strftime("%Y-%m-%dT%H:%M:%S"),
+        }
+        _save_recipes(recipes)
+
         return json.dumps({
             "success": True,
             "trigger_id": trigger_id,
             "trigger_slug": trigger_slug,
-            "message": f"Trigger '{trigger_slug}' created successfully. Events will be delivered automatically.",
-            "required_config": required_config,
+            "has_agent_prompt": bool(agent_prompt),
+            "message": (
+                f"Trigger '{trigger_slug}' created successfully. "
+                f"Events will be processed by the configured agent and delivered automatically."
+            ),
         }, ensure_ascii=False)
     except Exception as e:
         logger.error("Error creating trigger: %s", e)
@@ -257,11 +453,7 @@ def create_trigger(trigger_slug: str, trigger_config: dict = None) -> str:
 
 
 def list_active_triggers() -> str:
-    """List all active trigger instances for the current user.
-
-    Returns:
-        JSON string with active triggers.
-    """
+    """List all active trigger instances for the current user."""
     if not is_enabled():
         return json.dumps({"error": "Composio not enabled"})
 
@@ -269,13 +461,21 @@ def list_active_triggers() -> str:
         from composio import Composio
         client = Composio()
         triggers = client.triggers.list_active(user_ids=[COMPOSIO_USER_ID])
+
+        # Merge with local recipes for agent_prompt info
+        recipes = _load_recipes()
+
         result = []
         for t in triggers:
+            tid = getattr(t, 'trigger_id', str(t))
+            recipe = recipes.get(tid, {})
             result.append({
-                "trigger_id": getattr(t, 'trigger_id', str(t)),
+                "trigger_id": tid,
                 "trigger_slug": getattr(t, 'trigger_slug', ''),
                 "status": getattr(t, 'status', ''),
                 "created_at": getattr(t, 'created_at', ''),
+                "has_agent_prompt": bool(recipe.get("agent_prompt")),
+                "agent_prompt_preview": (recipe.get("agent_prompt") or "")[:100],
             })
         return json.dumps({"active_triggers": result}, ensure_ascii=False)
     except Exception as e:
@@ -284,14 +484,7 @@ def list_active_triggers() -> str:
 
 
 def delete_trigger(trigger_id: str) -> str:
-    """Delete/disable a trigger instance.
-
-    Args:
-        trigger_id: The trigger instance ID to delete.
-
-    Returns:
-        JSON string with result.
-    """
+    """Delete/disable a trigger instance and remove its recipe."""
     if not is_enabled():
         return json.dumps({"error": "Composio not enabled"})
 
@@ -299,9 +492,15 @@ def delete_trigger(trigger_id: str) -> str:
         from composio import Composio
         client = Composio()
         client.triggers.disable(trigger_id=trigger_id)
+
+        # Remove recipe from local storage
+        recipes = _load_recipes()
+        recipes.pop(trigger_id, None)
+        _save_recipes(recipes)
+
         return json.dumps({
             "success": True,
-            "message": f"Trigger {trigger_id} disabled successfully.",
+            "message": f"Trigger {trigger_id} disabled and recipe removed.",
         })
     except Exception as e:
         logger.error("Error deleting trigger: %s", e)
