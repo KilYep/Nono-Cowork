@@ -32,9 +32,8 @@ import {
 // ── Types ──
 
 interface ThoughtEvent {
-  type: "reasoning" | "narration" | "tool_call" | "tool_result";
+  type: "tool_call" | "tool_result";
   round: number;
-  content?: string;
   toolName?: string;
   args?: Record<string, unknown>;
   result?: string;
@@ -44,6 +43,7 @@ interface ChatMessage {
   id: string;
   role: "user" | "assistant";
   content: string;
+  reasoning?: string;
   thoughts?: ThoughtEvent[];
 }
 
@@ -60,13 +60,10 @@ interface SessionStatus {
 
 const API_BASE = import.meta.env.VITE_API_BASE || "http://localhost:8080";
 
-// ── Thoughts Renderer ──
-// Renders a list of ThoughtEvents using Reasoning + Tool components
-// - reasoning → Reasoning component (collapsible internal thinking)
-// - narration → Inline text (visible LLM text alongside tool calls)
-// - tool_call + tool_result → Tool component
+// ── Tool Events Renderer ──
+// Renders tool_call + tool_result as Tool components
 
-function ThoughtsRenderer({
+function ToolEventsRenderer({
   thoughts,
   isActive,
 }: {
@@ -79,40 +76,6 @@ function ThoughtsRenderer({
   while (i < thoughts.length) {
     const evt = thoughts[i];
 
-    // Internal reasoning from thinking models → Reasoning component
-    if (evt.type === "reasoning") {
-      // Merge consecutive reasoning events
-      let text = evt.content || "";
-      let j = i + 1;
-      while (j < thoughts.length && thoughts[j].type === "reasoning") {
-        text += "\n\n" + (thoughts[j].content || "");
-        j++;
-      }
-      const isLastChunk = j >= thoughts.length;
-      const isThisStreaming = isActive && isLastChunk;
-
-      items.push(
-        <Reasoning key={`r-${i}`} isStreaming={isThisStreaming} className="w-full">
-          <ReasoningTrigger />
-          <ReasoningContent>{text}</ReasoningContent>
-        </Reasoning>
-      );
-      i = j;
-      continue;
-    }
-
-    // Narration: LLM's visible text alongside tool calls → inline text
-    if (evt.type === "narration") {
-      items.push(
-        <p key={`n-${i}`} className="text-sm text-muted-foreground my-1">
-          {evt.content}
-        </p>
-      );
-      i++;
-      continue;
-    }
-
-    // Tool call + result → Tool component
     if (evt.type === "tool_call") {
       const nextEvt = i + 1 < thoughts.length ? thoughts[i + 1] : null;
       const hasResult =
@@ -123,9 +86,9 @@ function ThoughtsRenderer({
       if (hasResult) {
         toolState = "output-available";
       } else if (isActive) {
-        toolState = "input-available"; // Running
+        toolState = "input-available";
       } else {
-        toolState = "input-streaming"; // Pending
+        toolState = "input-streaming";
       }
 
       items.push(
@@ -150,7 +113,6 @@ function ThoughtsRenderer({
       continue;
     }
 
-    // Skip standalone tool_result
     i++;
   }
 
@@ -220,6 +182,29 @@ function App() {
     const assistantId = nextId();
     const currentThoughts: ThoughtEvent[] = [];
     let assistantContent = "";
+    let currentReasoning = "";
+
+    const updateMsg = (patch: Partial<ChatMessage>) => {
+      setMessages((prev) => {
+        const existing = prev.find((m) => m.id === assistantId);
+        if (existing) {
+          return prev.map((m) =>
+            m.id === assistantId ? { ...m, ...patch } : m
+          );
+        }
+        return [
+          ...prev,
+          {
+            id: assistantId,
+            role: "assistant" as const,
+            content: assistantContent,
+            reasoning: currentReasoning,
+            thoughts: [...currentThoughts],
+            ...patch,
+          },
+        ];
+      });
+    };
 
     try {
       const res = await fetch(`${API_BASE}/api/chat`, {
@@ -232,7 +217,6 @@ function App() {
         throw new Error(`HTTP ${res.status}`);
       }
 
-      // Parse SSE stream
       const reader = res.body?.getReader();
       if (!reader) throw new Error("No response body");
 
@@ -244,10 +228,8 @@ function App() {
         if (done) break;
 
         buffer += decoder.decode(value, { stream: true });
-
-        // Parse SSE events from buffer
         const lines = buffer.split("\n");
-        buffer = lines.pop() || ""; // Keep incomplete line in buffer
+        buffer = lines.pop() || "";
 
         let eventType = "";
         for (const line of lines) {
@@ -262,64 +244,29 @@ function App() {
 
               if (eventType === "status") {
                 setStatusText(data.text);
+              } else if (eventType === "reasoning_chunk") {
+                currentReasoning += (data.content || "");
+                setThinkingMsgId(assistantId);
+                updateMsg({ reasoning: currentReasoning });
+              } else if (eventType === "text_chunk") {
+                assistantContent += (data.content || "");
+                setAnimatingMsgId(assistantId);
+                updateMsg({ content: assistantContent });
               } else if (eventType === "thought") {
-                // Collect structured thought events
-                const evt: ThoughtEvent = {
+                currentThoughts.push({
                   type: data.type,
                   round: data.round,
-                  content: data.content,
                   toolName: data.tool_name,
                   args: data.args,
                   result: data.result,
-                };
-                currentThoughts.push(evt);
-                setThinkingMsgId(assistantId);
-                // Update the thoughts in messages state
-                setMessages((prev) => {
-                  const existing = prev.find((m) => m.id === assistantId);
-                  if (existing) {
-                    return prev.map((m) =>
-                      m.id === assistantId
-                        ? { ...m, thoughts: [...currentThoughts] }
-                        : m
-                    );
-                  } else {
-                    return [
-                      ...prev,
-                      {
-                        id: assistantId,
-                        role: "assistant" as const,
-                        content: "",
-                        thoughts: [...currentThoughts],
-                      },
-                    ];
-                  }
                 });
+                setThinkingMsgId(assistantId);
+                updateMsg({ thoughts: [...currentThoughts] });
               } else if (eventType === "reply") {
                 assistantContent = data.text;
                 setAnimatingMsgId(assistantId);
-                setMessages((prev) => {
-                  const existing = prev.find((m) => m.id === assistantId);
-                  if (existing) {
-                    return prev.map((m) =>
-                      m.id === assistantId
-                        ? { ...m, content: assistantContent }
-                        : m
-                    );
-                  } else {
-                    return [
-                      ...prev,
-                      {
-                        id: assistantId,
-                        role: "assistant" as const,
-                        content: assistantContent,
-                        thoughts: [...currentThoughts],
-                      },
-                    ];
-                  }
-                });
+                updateMsg({ content: assistantContent });
               } else if (eventType === "done") {
-                // If no reply was received, don't add empty message
                 break;
               }
             } catch {
@@ -449,8 +396,17 @@ function App() {
                 <MessageContent>
                   {msg.role === "assistant" ? (
                     <>
+                      {msg.reasoning && (
+                        <Reasoning
+                          isStreaming={msg.id === thinkingMsgId && !msg.content}
+                          className="w-full"
+                        >
+                          <ReasoningTrigger />
+                          <ReasoningContent>{msg.reasoning}</ReasoningContent>
+                        </Reasoning>
+                      )}
                       {msg.thoughts && msg.thoughts.length > 0 && (
-                        <ThoughtsRenderer
+                        <ToolEventsRenderer
                           thoughts={msg.thoughts}
                           isActive={msg.id === thinkingMsgId}
                         />
