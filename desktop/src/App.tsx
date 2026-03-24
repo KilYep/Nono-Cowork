@@ -31,20 +31,17 @@ import {
 
 // ── Types ──
 
-interface ThoughtEvent {
-  type: "tool_call" | "tool_result";
-  round: number;
-  toolName?: string;
-  args?: Record<string, unknown>;
-  result?: string;
-}
+type MessagePart =
+  | { type: "text"; content: string }
+  | { type: "tool_call"; toolName?: string; args?: Record<string, unknown>; round: number }
+  | { type: "tool_result"; toolName?: string; result?: string; round: number };
 
 interface ChatMessage {
   id: string;
   role: "user" | "assistant";
   content: string;
   reasoning?: string;
-  thoughts?: ThoughtEvent[];
+  parts?: MessagePart[];
 }
 
 interface SessionStatus {
@@ -60,27 +57,37 @@ interface SessionStatus {
 
 const API_BASE = import.meta.env.VITE_API_BASE || "http://localhost:8080";
 
-// ── Tool Events Renderer ──
-// Renders tool_call + tool_result as Tool components
+// ── Parts Renderer ──
+// Renders MessagePart[] in order: text blocks + tool calls interleaved
 
-function ToolEventsRenderer({
-  thoughts,
+function PartsRenderer({
+  parts,
   isActive,
 }: {
-  thoughts: ThoughtEvent[];
+  parts: MessagePart[];
   isActive: boolean;
 }) {
   const items: React.ReactNode[] = [];
   let i = 0;
 
-  while (i < thoughts.length) {
-    const evt = thoughts[i];
+  while (i < parts.length) {
+    const part = parts[i];
 
-    if (evt.type === "tool_call") {
-      const nextEvt = i + 1 < thoughts.length ? thoughts[i + 1] : null;
+    if (part.type === "text") {
+      items.push(
+        <MessageResponse key={`text-${i}`}>
+          {part.content}
+        </MessageResponse>
+      );
+      i++;
+      continue;
+    }
+
+    if (part.type === "tool_call") {
+      const nextPart = i + 1 < parts.length ? parts[i + 1] : null;
       const hasResult =
-        nextEvt?.type === "tool_result" &&
-        nextEvt.toolName === evt.toolName;
+        nextPart?.type === "tool_result" &&
+        nextPart.toolName === part.toolName;
 
       let toolState: "input-available" | "output-available" | "input-streaming";
       if (hasResult) {
@@ -94,16 +101,16 @@ function ToolEventsRenderer({
       items.push(
         <Tool key={`t-${i}`} defaultOpen={toolState === "output-available"}>
           <ToolHeader
-            title={evt.toolName || "tool"}
-            type={`tool-${evt.toolName || "unknown"}` as `tool-${string}`}
+            title={part.toolName || "tool"}
+            type={`tool-${part.toolName || "unknown"}` as `tool-${string}`}
             state={toolState}
           />
           <ToolContent>
-            {evt.args && Object.keys(evt.args).length > 0 && (
-              <ToolInput input={evt.args} />
+            {part.args && Object.keys(part.args).length > 0 && (
+              <ToolInput input={part.args} />
             )}
-            {hasResult && nextEvt && (
-              <ToolOutput output={nextEvt.result} errorText={undefined} />
+            {hasResult && nextPart && nextPart.type === "tool_result" && (
+              <ToolOutput output={nextPart.result} errorText={undefined} />
             )}
           </ToolContent>
         </Tool>
@@ -113,6 +120,7 @@ function ToolEventsRenderer({
       continue;
     }
 
+    // Skip standalone tool_result
     i++;
   }
 
@@ -180,7 +188,7 @@ function App() {
 
     // Prepare assistant message placeholder
     const assistantId = nextId();
-    const currentThoughts: ThoughtEvent[] = [];
+    const currentParts: MessagePart[] = [];
     let assistantContent = "";
     let currentReasoning = "";
 
@@ -199,7 +207,7 @@ function App() {
             role: "assistant" as const,
             content: assistantContent,
             reasoning: currentReasoning,
-            thoughts: [...currentThoughts],
+            parts: [...currentParts],
             ...patch,
           },
         ];
@@ -249,11 +257,19 @@ function App() {
                 setThinkingMsgId(assistantId);
                 updateMsg({ reasoning: currentReasoning });
               } else if (eventType === "text_chunk") {
+                // Append to last text part, or create new one
+                const lastPart = currentParts[currentParts.length - 1];
+                if (lastPart && lastPart.type === "text") {
+                  lastPart.content += (data.content || "");
+                } else {
+                  currentParts.push({ type: "text", content: data.content || "" });
+                }
                 assistantContent += (data.content || "");
                 setAnimatingMsgId(assistantId);
-                updateMsg({ content: assistantContent });
+                updateMsg({ content: assistantContent, parts: [...currentParts] });
               } else if (eventType === "thought") {
-                currentThoughts.push({
+                // Tool events: push in order
+                currentParts.push({
                   type: data.type,
                   round: data.round,
                   toolName: data.tool_name,
@@ -261,12 +277,15 @@ function App() {
                   result: data.result,
                 });
                 setThinkingMsgId(assistantId);
-                updateMsg({ thoughts: [...currentThoughts] });
+                updateMsg({ parts: [...currentParts] });
               } else if (eventType === "reply") {
-                // Final complete reply (fallback if text_chunk was not used)
-                assistantContent = data.text;
-                setAnimatingMsgId(assistantId);
-                updateMsg({ content: assistantContent });
+                // Fallback: only use reply if no text_chunk was received
+                // (reply may only contain the last round's text)
+                if (!assistantContent) {
+                  assistantContent = data.text;
+                  setAnimatingMsgId(assistantId);
+                  updateMsg({ content: assistantContent });
+                }
               } else if (eventType === "done") {
                 break;
               }
@@ -406,19 +425,11 @@ function App() {
                           <ReasoningContent>{msg.reasoning}</ReasoningContent>
                         </Reasoning>
                       )}
-                      {msg.thoughts && msg.thoughts.length > 0 && (
-                        <ToolEventsRenderer
-                          thoughts={msg.thoughts}
+                      {msg.parts && msg.parts.length > 0 && (
+                        <PartsRenderer
+                          parts={msg.parts}
                           isActive={msg.id === thinkingMsgId}
                         />
-                      )}
-                      {msg.content && (
-                        <MessageResponse
-                          animated
-                          isAnimating={msg.id === animatingMsgId}
-                        >
-                          {msg.content}
-                        </MessageResponse>
                       )}
                     </>
                   ) : (
