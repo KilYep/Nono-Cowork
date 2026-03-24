@@ -102,11 +102,8 @@ class DesktopChannel(Channel):
                 # (desktop already received reasoning_chunk events)
                 pass
             elif evt_type == "narration":
-                self._push_event(user_id, "thought", {
-                    "type": "narration",
-                    "content": evt.get("content", ""),
-                    "round": evt.get("round"),
-                })
+                # Skip — narration text was already delivered via text_chunk events
+                pass
             elif evt_type == "tool_call":
                 self._push_event(user_id, "thought", {
                     "type": "tool_call",
