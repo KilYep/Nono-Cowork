@@ -263,6 +263,7 @@ function App() {
                 setThinkingMsgId(assistantId);
                 updateMsg({ thoughts: [...currentThoughts] });
               } else if (eventType === "reply") {
+                // Final complete reply (fallback if text_chunk was not used)
                 assistantContent = data.text;
                 setAnimatingMsgId(assistantId);
                 updateMsg({ content: assistantContent });
