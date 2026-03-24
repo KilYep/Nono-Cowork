@@ -24,6 +24,9 @@ dependencies = [
     "pymupdf>=1.25.0",
     "openpyxl>=3.1.5",
     "python-docx>=1.1.2",
+    "fastapi>=0.115.0",
+    "uvicorn>=0.34.0",
+    "sse-starlette>=2.2.0",
 ]
 
 
@@ -31,6 +34,7 @@ dependencies = [
 agent = "src.agent:main"
 feishu-bot = "src.channels.feishu:main"
 telegram-bot = "src.channels.telegram:main"
+desktop-agent = "src.channels.desktop:main"
 
 [build-system]
 requires = ["hatchling"]
