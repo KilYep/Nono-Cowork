@@ -13,7 +13,7 @@ import os
 import time
 import logging
 
-from config import COMPOSIO_API_KEY, COMPOSIO_USER_ID
+from config import COMPOSIO_API_KEY, COMPOSIO_USER_ID, AGENT_WORK_DIR
 
 logger = logging.getLogger("prompt")
 
@@ -59,10 +59,11 @@ Your operations work as if you're on the user's own computer — files you modif
 def _section_environment(workspace: str) -> str:
     return f"""\
 # Your Environment
-- Running on a Linux server with full operation privileges
+- Running on a dedicated Linux server with full operation privileges and unrestricted network access
 - Your default working directory is: {workspace}
 - Files synced in real-time with the user's local machine via Syncthing
 - You can freely use all tools on the server (Python, Shell, network, etc.)
+- You can directly download files from any URL using curl/wget — no need for remote sandboxes
 - Document processing libraries available: pymupdf (PDF), openpyxl (Excel), python-docx (Word)"""
 
 
@@ -236,7 +237,15 @@ Do NOT call sync tools for operations outside {workspace} (e.g., installing skil
 - WHEN modifying/deleting/renaming 3+ files at once: call sync_pause() FIRST → do all changes → call sync_resume() when done. This prevents the user from seeing a half-finished state
 - WHEN the user reports a file was accidentally deleted or overwritten: call sync_versions() to list recoverable versions, then sync_restore() to bring it back. Also check list_snapshots() — every edit_file call auto-saves the original file before modifying it
 - WHEN you see any file matching *.sync-conflict-* pattern (via ls or find): alert the user immediately — this means both sides edited the same file. Compare both versions and ask which to keep
-- WHEN the user says "undo" or wants to revert your edit: call list_snapshots() to find the pre-edit backup, then cp it back"""
+- WHEN the user says "undo" or wants to revert your edit: call list_snapshots() to find the pre-edit backup, then cp it back
+
+## Workspace Hygiene (CRITICAL)
+The sync folder ({workspace}) is ONLY for user-facing files. NEVER create intermediate artifacts here:
+- NEVER create Python virtual environments (venv, .venv) inside {workspace}. Use {AGENT_WORK_DIR}/ instead
+- NEVER run pip install / uv pip install with a venv located inside {workspace}
+- NEVER place build outputs (dist/, build/, *.egg-info) inside {workspace}
+- When writing scripts that need dependencies, create the venv in {AGENT_WORK_DIR}/<script_name>/ and reference it from there
+- Only the final output files (documents, data, scripts themselves) should be saved to {workspace}"""
 
 
 def _section_skills() -> str:
@@ -260,7 +269,7 @@ def _section_communication() -> str:
 
 
 def _section_work_habits() -> str:
-    return """\
+    return f"""\
 # Work Habits
 - Before operating, use read_file or run_command("ls") to check the current state — don't guess
 - After each step, verify the result before proceeding
@@ -268,7 +277,8 @@ def _section_work_habits() -> str:
 - ALWAYS use edit_file to modify existing files — it auto-saves a backup before each edit. NEVER use run_command("sed -i ...") or shell redirects to modify files in the sync folder, because those bypass the backup system
 - When encountering errors, carefully analyze the traceback and identify the root cause before fixing
 - If the same error persists after 3 fix attempts, proactively search the web for solutions
-- Use uv to manage Python environments and dependencies"""
+- Use uv to manage Python environments and dependencies
+- When running scripts that need a venv, create it in {AGENT_WORK_DIR}/ — NEVER in the sync folder"""
 
 
 def _section_safety(workspace: str) -> str:

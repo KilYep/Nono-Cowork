@@ -133,6 +133,34 @@ class SyncthingClient:
         """Resume syncing for a folder."""
         return self._patch(f"/rest/config/folders/{folder_id}", {"paused": False})
 
+    # ——— Ignore list management ———
+
+    def get_ignores(self, folder_id):
+        """Get the current .stignore patterns for a folder."""
+        return self._get("/rest/db/ignores", folder=folder_id)
+
+    def set_ignores(self, folder_id, ignore_lines: list[str]):
+        """Set .stignore patterns for a folder via API."""
+        r = requests.post(
+            f"{self.url}/rest/db/ignores",
+            headers={**self.headers, "Content-Type": "application/json"},
+            params={"folder": folder_id},
+            data=json.dumps({"ignore": ignore_lines}),
+            timeout=10,
+        )
+        r.raise_for_status()
+        return r.json() if r.content else {}
+
+    def add_ignore_pattern(self, folder_id, pattern: str):
+        """Add a pattern to .stignore if not already present."""
+        current = self.get_ignores(folder_id)
+        lines = current.get("ignore", []) or []
+        if pattern not in lines:
+            lines.append(pattern)
+            self.set_ignores(folder_id, lines)
+            return True
+        return False
+
     # ——— Error checking ———
 
     def get_folder_errors(self, folder_id):
@@ -425,3 +453,33 @@ def sync_resume() -> str:
         return "❌ Cannot connect to Syncthing. Is the service running?"
     except Exception as e:
         return f"❌ Failed to resume sync: {e}"
+
+
+@tool(
+    name="sync_ignore_add",
+    description="Add a pattern to .stignore so it won't sync to the user's machine. Use this BEFORE creating temporary files or directories in the sync folder that the user doesn't need (e.g., venvs, build outputs, temp data). Pattern uses Syncthing ignore syntax (e.g., '(?d)**/my_temp_dir').",
+    parameters={
+        "type": "object",
+        "properties": {
+            "pattern": {
+                "type": "string",
+                "description": "The ignore pattern to add (Syncthing .stignore syntax). Prefix with (?d) to also delete remote copies.",
+            },
+        },
+        "required": ["pattern"],
+    },
+)
+def sync_ignore_add(pattern: str) -> str:
+    """Add a pattern to .stignore dynamically."""
+    try:
+        st = _get_client()
+        folder_id = st.resolve_folder_id()
+        added = st.add_ignore_pattern(folder_id, pattern)
+        if added:
+            return f"✅ Added ignore pattern: {pattern}"
+        else:
+            return f"ℹ️ Pattern already exists: {pattern}"
+    except requests.ConnectionError:
+        return "❌ Cannot connect to Syncthing. Is the service running?"
+    except Exception as e:
+        return f"❌ Failed to add ignore pattern: {e}"

@@ -104,24 +104,43 @@ SYNCTHING_API_KEY=xxxxxxxxxxxxxxxxxxxxx
 
 ## 6. Recommended .stignore Configuration
 
-Create a `.stignore` file in the synced folder to exclude unnecessary content:
+Create a `.stignore` file in the synced folder to exclude unnecessary content.
+
+> **Note:** The Agent automatically ensures essential patterns are present via `_ensure_stignore()` at startup, but it's good practice to configure a comprehensive `.stignore` from the start.
+
+The `(?d)` prefix tells Syncthing to also delete remote copies of newly-ignored files. The `**` pattern matches any number of subdirectories.
 
 ```
-// Virtual environments and dependencies
-.venv
-node_modules
-__pycache__
+// Python virtual environments (wildcard covers .venv, .venv2, .blog_venv, etc.)
+(?d)**/*venv*
+(?d)**/env
+
+// Python caches and build artifacts
+(?d)**/__pycache__
+(?d)**/*.pyc
+(?d)**/*.pyo
+(?d)**/*.egg-info
+
+// Node.js
+(?d)**/node_modules
 
 // IDE and system files
-.idea
-.vscode
-.DS_Store
-Thumbs.db
+(?d)**/.idea
+(?d)**/.vscode
+(?d)**/.DS_Store
+(?d)**/Thumbs.db
 
-// Large files
-*.zip
-*.tar.gz
-*.mp4
+// Git repos
+(?d)**/.git
+
+// Agent internals
+(?d).agent_snapshots
+(?d).stversions
+
+// Large binary files (prevent accidental sync)
+(?d)**/*.zip
+(?d)**/*.tar.gz
+(?d)**/*.mp4
 ```
 
 ## 7. Verify Sync

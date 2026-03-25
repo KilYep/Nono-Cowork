@@ -104,24 +104,43 @@ SYNCTHING_API_KEY=xxxxxxxxxxxxxxxxxxxxx
 
 ## 6. 推荐的 .stignore 配置
 
-在同步文件夹中创建 `.stignore` 文件，排除不需要同步的内容：
+在同步文件夹中创建 `.stignore` 文件，排除不需要同步的内容。
+
+> **提示：** Agent 启动时会通过 `_ensure_stignore()` 自动检查关键规则是否存在，但建议一开始就配置完整的 `.stignore`。
+
+`(?d)` 前缀表示新忽略的文件也会从远端删除。`**` 通配符匹配任意层级子目录。
 
 ```
-// 虚拟环境和依赖
-.venv
-node_modules
-__pycache__
+// Python 虚拟环境（通配符覆盖 .venv, .venv2, .blog_venv 等变体）
+(?d)**/*venv*
+(?d)**/env
+
+// Python 缓存和构建产物
+(?d)**/__pycache__
+(?d)**/*.pyc
+(?d)**/*.pyo
+(?d)**/*.egg-info
+
+// Node.js
+(?d)**/node_modules
 
 // IDE 和系统文件
-.idea
-.vscode
-.DS_Store
-Thumbs.db
+(?d)**/.idea
+(?d)**/.vscode
+(?d)**/.DS_Store
+(?d)**/Thumbs.db
 
-// 大文件
-*.zip
-*.tar.gz
-*.mp4
+// Git 仓库
+(?d)**/.git
+
+// Agent 内部产物
+(?d).agent_snapshots
+(?d).stversions
+
+// 大型二进制文件（防止意外同步）
+(?d)**/*.zip
+(?d)**/*.tar.gz
+(?d)**/*.mp4
 ```
 
 ## 7. 验证同步

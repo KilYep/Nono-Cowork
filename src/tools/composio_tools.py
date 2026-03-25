@@ -294,24 +294,45 @@ def execute(tool_name: str, arguments: dict) -> str:
     Returns:
         Cleaned JSON string ready to be placed in the tool message content.
     """
+    from concurrent.futures import ThreadPoolExecutor, TimeoutError as FuturesTimeoutError
+    from config import COMPOSIO_EXECUTE_TIMEOUT
+
     if not _composio_client:
         return json.dumps({"error": "Composio not initialized"})
 
-    try:
-        raw_result = _composio_client.tools.execute(
+    def _do_execute():
+        return _composio_client.tools.execute(
             slug=tool_name,
             arguments=arguments,
             user_id=COMPOSIO_USER_ID,
             dangerously_skip_version_check=True,
         )
 
+    try:
+        with ThreadPoolExecutor(max_workers=1) as pool:
+            future = pool.submit(_do_execute)
+            raw_result = future.result(timeout=COMPOSIO_EXECUTE_TIMEOUT)
+
         # Start background auth watchers for any initiated connections
         if tool_name == "COMPOSIO_MANAGE_CONNECTIONS":
             _maybe_start_auth_watchers(raw_result)
 
-        # TODO: Re-enable cleaning after functionality is verified
-        # cleaned = _clean_tool_result(tool_name, raw_result)
+        # Pass through full result — don't clean until we've validated
+        # which fields are safe to strip without confusing the agent.
+        # (Composio responses are also excluded from the spill mechanism
+        # in agent.py, so the full data goes directly into context.)
         return json.dumps(raw_result, ensure_ascii=False)
+    except FuturesTimeoutError:
+        logger.error(
+            "Composio execute TIMEOUT for %s after %ds", tool_name, COMPOSIO_EXECUTE_TIMEOUT
+        )
+        return json.dumps({
+            "error": f"Tool execution timed out after {COMPOSIO_EXECUTE_TIMEOUT}s. "
+                     "The remote API (e.g. Gmail) took too long to respond. "
+                     "Please retry or try a different approach.",
+            "successful": False,
+            "timed_out": True,
+        })
     except Exception as e:
         logger.error("Composio execute error for %s: %s", tool_name, e)
         return json.dumps({"error": str(e), "successful": False})
@@ -347,7 +368,20 @@ def _clean_tool_result(tool_name: str, raw: dict) -> dict:
 
 
 def _clean_search_tools(raw: dict) -> dict:
-    """Clean COMPOSIO_SEARCH_TOOLS result."""
+    """Clean COMPOSIO_SEARCH_TOOLS result — preserve guidance, trim fat.
+
+    Previous version was too aggressive: it dropped execution_guidance,
+    reference_workbench_snippets, and all Optional plan steps. This caused
+    the agent to miss critical information like:
+      - How to download s3url (workbench snippet)
+      - When to use COMPOSIO_REMOTE_WORKBENCH (Optional Step 7)
+      - How to handle expired tokens (Optional Step 6)
+
+    New strategy: keep all guidance/steps/pitfalls, only trim:
+      - Schema examples (verbose, not actionable)
+      - Connection description/details (redundant with status)
+      - Related tool schema descriptions (truncate, keep ref)
+    """
     data = raw.get('data', {})
 
     # Collect all primary slugs
@@ -355,29 +389,23 @@ def _clean_search_tools(raw: dict) -> dict:
     for r in data.get('results', []):
         primary_slugs.update(r.get('primary_tool_slugs', []))
 
-    # Clean results: keep only [Required] steps, primary-related pitfalls
+    # Clean results: keep ALL steps, guidance, snippets, and pitfalls
     cleaned_results = []
     for r in data.get('results', []):
-        plan_steps = r.get('recommended_plan_steps', [])
-        filtered_steps = [s for s in plan_steps if '[Required]' in s]
-
-        pitfalls = r.get('known_pitfalls', [])
-        filtered_pitfalls = [
-            p for p in pitfalls
-            if any(slug in p for slug in primary_slugs)
-        ]
-
-        cleaned_results.append({
+        entry = {
             'use_case': r.get('use_case'),
-            'recommended_plan_steps': filtered_steps,
-            'known_pitfalls': filtered_pitfalls,
+            'execution_guidance': r.get('execution_guidance'),
+            'recommended_plan_steps': r.get('recommended_plan_steps', []),
+            'known_pitfalls': r.get('known_pitfalls', []),
+            'reference_workbench_snippets': r.get('reference_workbench_snippets', []),
             'primary_tool_slugs': r.get('primary_tool_slugs'),
             'related_tool_slugs': r.get('related_tool_slugs'),
             'toolkits': r.get('toolkits'),
             'plan_id': r.get('plan_id'),
-        })
+        }
+        cleaned_results.append(entry)
 
-    # Clean connection statuses: drop description, connection_details, current_user_info
+    # Clean connection statuses: drop verbose description & connection_details
     cleaned_connections = []
     for c in data.get('toolkit_connection_statuses', []):
         cleaned_connections.append({
@@ -388,7 +416,7 @@ def _clean_search_tools(raw: dict) -> dict:
 
     # Clean tool schemas:
     #   - primary: full schema (minus examples)
-    #   - related: only slug + truncated description (120 chars)
+    #   - related: only slug + truncated description (200 chars) + schemaRef
     cleaned_schemas = {}
     for slug, s in data.get('tool_schemas', {}).items():
         if slug in primary_slugs:
@@ -402,7 +430,7 @@ def _clean_search_tools(raw: dict) -> dict:
             desc = s.get('description', '')
             cleaned_schemas[slug] = {
                 'tool_slug': s.get('tool_slug'),
-                'description': desc[:120] + '...' if len(desc) > 120 else desc,
+                'description': desc[:200] + '...' if len(desc) > 200 else desc,
             }
             if s.get('schemaRef'):
                 cleaned_schemas[slug]['schemaRef'] = s['schemaRef']

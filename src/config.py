@@ -50,7 +50,16 @@ SESSIONS_DIR = os.path.join(os.path.dirname(os.path.dirname(__file__)), "data", 
 COMPOSIO_API_KEY = os.getenv("COMPOSIO_API_KEY", "").strip()
 COMPOSIO_USER_ID = os.getenv("COMPOSIO_USER_ID", "default").strip()
 COMPOSIO_AUTH_WAIT_TIMEOUT = int(os.getenv("COMPOSIO_AUTH_WAIT_TIMEOUT", "300"))  # seconds
+COMPOSIO_EXECUTE_TIMEOUT = int(os.getenv("COMPOSIO_EXECUTE_TIMEOUT", "120"))  # seconds, hard timeout per tool execution
 
 # ── Webhook / Composio Triggers ──
 WEBHOOK_PORT = int(os.getenv("WEBHOOK_PORT", "9090"))
 SERVER_HOST = os.getenv("SERVER_HOST", "").strip()  # Public hostname/IP for webhooks
+
+# ── Agent Work Directory ──
+# Scratch area for venvs, build outputs, and other intermediate artifacts that should
+# NOT be placed inside the Syncthing sync folder. Uses XDG cache dir for portability.
+# Override with AGENT_WORK_DIR env var if needed.
+AGENT_WORK_DIR = os.path.expanduser(
+    os.getenv("AGENT_WORK_DIR", "~/.cache/hands-on-agent")
+)

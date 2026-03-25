@@ -122,8 +122,43 @@ def _get_workspace():
 
 _stignore_checked = False
 
+# Essential patterns that must be in .stignore for a clean Agent workspace sync.
+# Uses (?d) prefix = Syncthing will delete local copies of newly-ignored files on remote.
+_REQUIRED_STIGNORE_PATTERNS = [
+    ("Python venvs", [
+        "(?d)**/*venv*",
+        "(?d)**/env",
+    ]),
+    ("Python caches", [
+        "(?d)**/__pycache__",
+        "(?d)**/*.pyc",
+        "(?d)**/*.pyo",
+        "(?d)**/*.egg-info",
+    ]),
+    ("Node.js", [
+        "(?d)**/node_modules",
+    ]),
+    ("IDE and system files", [
+        "(?d)**/.idea",
+        "(?d)**/.vscode",
+        "(?d)**/.DS_Store",
+    ]),
+    ("Git repos", [
+        "(?d)**/.git",
+    ]),
+    ("Agent internals", [
+        "(?d).agent_snapshots",
+        "(?d).stversions",
+    ]),
+]
+
+
 def _ensure_stignore(workspace: str):
-    """Make sure .agent_snapshots is in .stignore so it doesn't sync to user's machine."""
+    """Ensure .stignore contains all essential patterns for a clean Agent workspace sync.
+
+    Checks each required pattern and appends any missing ones.
+    Idempotent — safe to call multiple times.
+    """
     global _stignore_checked
     if _stignore_checked:
         return
@@ -131,19 +166,32 @@ def _ensure_stignore(workspace: str):
 
     try:
         stignore_path = os.path.join(workspace, ".stignore")
-        entry = ".agent_snapshots"
 
-        # Check if already present
+        # Read existing content
+        existing = ""
         if os.path.exists(stignore_path):
             with open(stignore_path, "r") as f:
-                if entry in f.read():
-                    return
+                existing = f.read()
 
-        # Append it
+        # Collect missing patterns
+        missing_sections = []
+        for section_name, patterns in _REQUIRED_STIGNORE_PATTERNS:
+            missing = [p for p in patterns if p not in existing]
+            if missing:
+                missing_sections.append((section_name, missing))
+
+        if not missing_sections:
+            return  # All patterns already present
+
+        # Append missing patterns
         with open(stignore_path, "a") as f:
-            f.write(f"\n// Agent edit snapshots (auto-added)\n{entry}\n")
+            f.write("\n// ── Auto-managed by Agent (do not remove) ──\n")
+            for section_name, patterns in missing_sections:
+                f.write(f"// {section_name}\n")
+                for p in patterns:
+                    f.write(f"{p}\n")
     except Exception:
-        pass
+        pass  # Non-critical — don't break agent startup
 
 
 def _snapshot_file(file_path: str) -> str | None:

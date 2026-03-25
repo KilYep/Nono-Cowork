@@ -18,7 +18,7 @@ _bg_processes: dict[int, dict] = {}   # PID → {"proc": Popen, "output": list[s
 
 @tool(
     name="run_command",
-    description="Execute a bash command on the Linux server. Can be used for: git clone, installing dependencies (pip install), running Python scripts, viewing file contents (cat/ls/find), creating directories, and any other terminal operations. Short-running commands return output directly. Long-running commands automatically return a PID; use check_command_status to view the result later.\n\nNote: If the output is very large, it will be automatically saved to a temporary file. A preview and file path will be returned; use read_file with line ranges to view specific sections.",
+    description="Execute a bash command on the Linux server. Can be used for: git clone, installing dependencies (pip install), running Python scripts, viewing file contents (cat/ls/find), creating directories, downloading files from URLs (curl -o /path/file 'url'), and any other terminal operations. Short-running commands return output directly. Long-running commands automatically return a PID; use check_command_status to view the result later.\n\nNote: If the output is very large, it will be automatically saved to a temporary file. A preview and file path will be returned; use read_file with line ranges to view specific sections.",
     parameters={
         "type": "object",
         "properties": {
