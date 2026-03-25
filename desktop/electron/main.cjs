@@ -1,4 +1,4 @@
-const { app, BrowserWindow } = require('electron');
+const { app, BrowserWindow, ipcMain } = require('electron');
 const path = require('path');
 
 function createWindow() {
@@ -8,11 +8,24 @@ function createWindow() {
     webPreferences: {
       nodeIntegration: false,
       contextIsolation: true,
+      preload: path.join(__dirname, 'preload.cjs'),
     },
-    // Clean look
-    titleBarStyle: 'default',
+    // Frameless modern look
+    frame: false,
+    titleBarStyle: 'hidden',
     title: 'Nono CoWork',
   });
+
+  // Window control handlers
+  ipcMain.on('window-minimize', () => mainWindow.minimize());
+  ipcMain.on('window-maximize', () => {
+    if (mainWindow.isMaximized()) {
+      mainWindow.unmaximize();
+    } else {
+      mainWindow.maximize();
+    }
+  });
+  ipcMain.on('window-close', () => mainWindow.close());
 
   // In development, load Vite dev server
   if (process.env.NODE_ENV === 'development' || !app.isPackaged) {

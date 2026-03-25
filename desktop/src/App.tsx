@@ -1,4 +1,15 @@
 import { useState, useCallback, useRef, useEffect } from "react";
+
+// Electron window control API exposed via preload
+declare global {
+  interface Window {
+    electronAPI?: {
+      minimize: () => void;
+      maximize: () => void;
+      close: () => void;
+    };
+  }
+}
 import { TooltipProvider } from "@/components/ui/tooltip";
 import {
   Conversation,
@@ -383,13 +394,19 @@ function App() {
   return (
     <TooltipProvider>
       <div className="flex flex-col h-screen bg-background text-foreground">
-        {/* Header */}
-        <header className="flex items-center justify-between px-4 py-2 border-b border-border">
+        {/* Draggable Title Bar */}
+        <header
+          className="flex items-center justify-between px-4 py-2 select-none shrink-0"
+          style={{ WebkitAppRegion: 'drag' } as React.CSSProperties}
+        >
           <div className="flex items-center gap-3">
             <h1 className="text-sm font-semibold">Nono CoWork</h1>
             <span className={`text-xs ${connColor}`}>● {connLabel}</span>
           </div>
-          <div className="flex items-center gap-2">
+          <div
+            className="flex items-center gap-2"
+            style={{ WebkitAppRegion: 'no-drag' } as React.CSSProperties}
+          >
             <span className="text-xs text-muted-foreground">
               {sessionStatus.model || "..."}
             </span>
@@ -407,6 +424,30 @@ function App() {
             >
               Stop
             </button>
+            {/* Window controls */}
+            <div className="flex items-center ml-2 gap-0.5">
+              <button
+                onClick={() => window.electronAPI?.minimize()}
+                className="w-8 h-7 flex items-center justify-center rounded hover:bg-muted text-muted-foreground transition-colors"
+                aria-label="Minimize"
+              >
+                <svg width="12" height="12" viewBox="0 0 12 12"><rect y="5" width="12" height="1.5" rx="0.75" fill="currentColor"/></svg>
+              </button>
+              <button
+                onClick={() => window.electronAPI?.maximize()}
+                className="w-8 h-7 flex items-center justify-center rounded hover:bg-muted text-muted-foreground transition-colors"
+                aria-label="Maximize"
+              >
+                <svg width="12" height="12" viewBox="0 0 12 12"><rect x="1" y="1" width="10" height="10" rx="1.5" stroke="currentColor" strokeWidth="1.5" fill="none"/></svg>
+              </button>
+              <button
+                onClick={() => window.electronAPI?.close()}
+                className="w-8 h-7 flex items-center justify-center rounded hover:bg-red-500/80 hover:text-white text-muted-foreground transition-colors"
+                aria-label="Close"
+              >
+                <svg width="12" height="12" viewBox="0 0 12 12"><path d="M2 2l8 8M10 2l-8 8" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round"/></svg>
+              </button>
+            </div>
           </div>
         </header>
 
@@ -458,7 +499,7 @@ function App() {
         </Conversation>
 
         {/* Input area */}
-        <div className="border-t border-border p-3">
+        <div className="p-3">
           <PromptInput
             onSubmit={handlePromptSubmit}
           >
@@ -479,7 +520,7 @@ function App() {
 
         {/* Footer: context bar */}
         {sessionStatus.active && (
-          <footer className="flex items-center gap-3 px-4 py-1.5 border-t border-border text-xs text-muted-foreground">
+          <footer className="flex items-center gap-3 px-4 py-1.5 text-xs text-muted-foreground">
             <div className="flex items-center gap-1.5">
               <div className="w-24 h-1.5 bg-muted rounded-full overflow-hidden">
                 <div
