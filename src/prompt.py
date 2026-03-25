@@ -299,15 +299,16 @@ def _section_memory() -> str:
     else:
         if len(memory_content) > MEMORY_MAX_INJECT_CHARS:
             memory_content = memory_content[:MEMORY_MAX_INJECT_CHARS] + \
-                "\n\n... [memory truncated, use memory_read to see full contents]"
+                "\n\n... [memory truncated — it's getting long, reorganize and prune when you next write]"
         saved = f"\n\n## Saved Memories\n{memory_content}"
 
     return f"""\
 # Memory
-You have a persistent memory system. Use the `memory_append` tool to save important information about the user that should be remembered across sessions. Use `memory_read` to review your saved memories.
-- Proactively save user preferences, project context, personal facts, and recurring patterns
-- Keep memory entries concise — record facts, not full conversations
-- Use Markdown headings (## Topic) to organize different categories
+You have a persistent memory file. Your current memories are shown below (if any).
+To update memories, use the `memory_write` tool — it OVERWRITES the entire file, so include everything you want to keep.
+- Proactively remember user preferences, project context, personal facts, and recurring patterns
+- When you learn something new, read your current memories below, merge in the new info, and write the updated version
+- Keep it concise — facts, not conversations. Drop outdated info. Use ## headings to organize
 - Don't save trivial or one-time information{saved}"""
 
 

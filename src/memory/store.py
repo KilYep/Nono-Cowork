@@ -2,7 +2,7 @@
 Memory store — reads and writes a single persistent memory.md file.
 
 The memory file lives at the path configured by MEMORY_FILE (default: data/memory.md).
-The Agent can freely append to this file via the memory_append tool.
+The Agent overwrites this file via the memory_write tool.
 The file contents are injected into the system prompt at session start.
 
 The Markdown format is intentionally unstructured — the LLM decides
@@ -30,13 +30,14 @@ def load_memory() -> str:
         return ""
 
 
-def append_memory(content: str) -> str:
-    """Append content to the memory file.
+def write_memory(content: str) -> str:
+    """Overwrite the memory file with new content.
 
     Creates the file and parent directories if they don't exist.
+    Passing empty content effectively clears the memory.
 
     Args:
-        content: Markdown-formatted text to append.
+        content: Markdown-formatted text — the complete memory contents.
 
     Returns:
         A status message indicating success or failure.
@@ -44,40 +45,16 @@ def append_memory(content: str) -> str:
     os.makedirs(os.path.dirname(MEMORY_FILE), exist_ok=True)
 
     try:
-        existing = ""
-        if os.path.exists(MEMORY_FILE):
-            with open(MEMORY_FILE, "r", encoding="utf-8") as f:
-                existing = f.read()
-
-        with open(MEMORY_FILE, "a", encoding="utf-8") as f:
-            if existing.strip():
-                f.write("\n\n")
+        with open(MEMORY_FILE, "w", encoding="utf-8") as f:
             f.write(content.strip())
             f.write("\n")
 
-        logger.info("Appended memory (%d chars)", len(content))
-        return f"✅ Memory saved ({len(content)} chars)"
-    except Exception as e:
-        logger.error("Failed to save memory: %s", e)
-        return f"❌ Failed to save memory: {e}"
-
-
-def read_memory() -> str:
-    """Read the full memory file. Returns a formatted result."""
-    content = load_memory()
-    if not content:
-        return "📭 No memories saved yet."
-    return f"📝 Memory contents ({len(content)} chars):\n\n{content}"
-
-
-def reset_memory() -> str:
-    """Delete the memory file."""
-    if os.path.exists(MEMORY_FILE):
-        try:
-            os.remove(MEMORY_FILE)
-            logger.info("Memory reset")
+        chars = len(content.strip())
+        if chars == 0:
+            logger.info("Memory cleared")
             return "✅ Memory cleared."
-        except Exception as e:
-            logger.error("Failed to reset memory: %s", e)
-            return f"❌ Failed to clear memory: {e}"
-    return "📭 No memory to clear."
+        logger.info("Memory written (%d chars)", chars)
+        return f"✅ Memory saved ({chars} chars)"
+    except Exception as e:
+        logger.error("Failed to write memory: %s", e)
+        return f"❌ Failed to save memory: {e}"

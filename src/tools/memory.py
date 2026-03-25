@@ -1,24 +1,32 @@
 """
-Memory tools — Agent-facing tools to save and read persistent memories.
+Memory tool — lets the Agent maintain a persistent memory file.
 
-These tools let the Agent proactively record user preferences, important facts,
-and project context that should persist across sessions.
+A single `memory_write` tool replaces the old append/read/reset trio.
+The Agent reads memory via system prompt injection, and writes by
+overwriting the entire file — giving it full control to organize,
+update, deduplicate, and prune its own memories.
 """
 
 from tools.registry import tool
 
 
 @tool(
-    name="memory_append",
+    name="memory_write",
     description=(
-        "Save important information to persistent memory. Use this when you learn "
-        "something that should be remembered across sessions, such as:\n"
-        "- User preferences (coding style, language, naming conventions)\n"
-        "- Important project context (tech stack, directory structure)\n"
-        "- Personal facts (name, role, timezone)\n"
-        "- Recurring task patterns\n\n"
-        "The memory is stored as Markdown. You can use headings, lists, etc. to organize it.\n"
-        "Memories persist across sessions and are automatically loaded when a new session starts."
+        "Write the complete contents of your persistent memory file.\n"
+        "This OVERWRITES the entire file, so always include ALL memories you want to keep.\n\n"
+        "Use this when:\n"
+        "- You learn something new about the user (add it)\n"
+        "- A fact has changed (update it)\n"
+        "- Memory is cluttered (reorganize / prune it)\n"
+        "- User asks you to forget something (remove it)\n\n"
+        "Your current memories are already loaded in the system prompt under '## Saved Memories'.\n"
+        "Read them there, decide what to keep/change, then write the full updated version.\n\n"
+        "Guidelines:\n"
+        "- Use Markdown with headings (## Topic) to organize categories\n"
+        "- Be concise — record facts, not conversations\n"
+        "- Drop outdated or trivial information\n"
+        "- Keep the file under ~2000 chars for efficiency"
     ),
     parameters={
         "type": "object",
@@ -26,47 +34,15 @@ from tools.registry import tool
             "content": {
                 "type": "string",
                 "description": (
-                    "Markdown-formatted text to append to the memory file. "
-                    "Use headings (## Topic) to organize different categories. "
-                    "Be concise — record facts, not full conversations."
+                    "The complete Markdown content for the memory file. "
+                    "This replaces everything — include all memories you want to retain."
                 ),
             },
         },
         "required": ["content"],
     },
 )
-def memory_append(content: str) -> str:
-    """Append content to the memory file."""
-    from memory.store import append_memory
-    return append_memory(content)
-
-
-@tool(
-    name="memory_read",
-    description=(
-        "Read saved memories. Use this to recall information from previous sessions, "
-        "check what you already know, or review saved context before starting a task."
-    ),
-    parameters={
-        "type": "object",
-        "properties": {},
-    },
-)
-def memory_read() -> str:
-    """Read the full memory file."""
-    from memory.store import read_memory
-    return read_memory()
-
-
-@tool(
-    name="memory_reset",
-    description="Clear all saved memories. Use with caution — this cannot be undone.",
-    parameters={
-        "type": "object",
-        "properties": {},
-    },
-)
-def memory_reset() -> str:
-    """Delete the memory file."""
-    from memory.store import reset_memory
-    return reset_memory()
+def memory_write(content: str) -> str:
+    """Overwrite the memory file with new content."""
+    from memory.store import write_memory
+    return write_memory(content)
