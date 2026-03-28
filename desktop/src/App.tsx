@@ -39,6 +39,8 @@ import {
   ToolInput,
   ToolOutput,
 } from "@/components/ai-elements/tool";
+import { Sidebar } from "@/components/sidebar";
+import { PanelLeft } from "lucide-react";
 
 // ── Types ──
 
@@ -166,6 +168,7 @@ function App() {
   const [animatingMsgId, setAnimatingMsgId] = useState<string | null>(null);
   // Track which assistant message is actively receiving thought events
   const [thinkingMsgId, setThinkingMsgId] = useState<string | null>(null);
+  const [sidebarOpen, setSidebarOpen] = useState(true);
 
   // Health check on mount
   useEffect(() => {
@@ -176,6 +179,18 @@ function App() {
         setSessionStatus((prev) => ({ ...prev, model: data.model }));
       })
       .catch(() => setConnected(false));
+  }, []);
+
+  // Keyboard shortcuts
+  useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if ((e.ctrlKey || e.metaKey) && e.key === 'b') {
+        e.preventDefault();
+        setSidebarOpen((prev) => !prev);
+      }
+    };
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
   }, []);
 
   // Generate unique ID
@@ -393,145 +408,169 @@ function App() {
 
   return (
     <TooltipProvider>
-      <div className="flex flex-col h-screen bg-background text-foreground">
-        {/* Draggable Title Bar */}
-        <header
-          className="flex items-center justify-between px-4 py-2 select-none shrink-0"
-          style={{ WebkitAppRegion: 'drag' } as React.CSSProperties}
-        >
-          <div className="flex items-center gap-3">
-            <h1 className="text-sm font-semibold">Nono CoWork</h1>
-            <span className={`text-xs ${connColor}`}>● {connLabel}</span>
-          </div>
-          <div
-            className="flex items-center gap-2"
-            style={{ WebkitAppRegion: 'no-drag' } as React.CSSProperties}
+      <div className="flex h-screen bg-background text-foreground overflow-hidden">
+        {/* Sidebar */}
+        <Sidebar
+          isOpen={sidebarOpen}
+          onToggle={() => setSidebarOpen((p) => !p)}
+          onNewChat={() => { handleCommand("new"); setMessages([]); }}
+        />
+
+        {/* Main content */}
+        <div className="flex flex-col flex-1 min-w-0">
+          {/* Draggable Title Bar */}
+          <header
+            className="flex items-center justify-between px-4 h-11 select-none shrink-0"
+            style={{ WebkitAppRegion: 'drag' } as React.CSSProperties}
           >
-            <span className="text-xs text-muted-foreground">
-              {sessionStatus.model || "..."}
-            </span>
-            <button
-              onClick={() => handleCommand("reset")}
-              className="text-xs px-2 py-1 rounded hover:bg-muted text-muted-foreground"
-              disabled={isStreaming}
+            <div
+              className="flex items-center gap-2"
+              style={{ WebkitAppRegion: 'no-drag' } as React.CSSProperties}
             >
-              Reset
-            </button>
-            <button
-              onClick={() => handleCommand("stop")}
-              className="text-xs px-2 py-1 rounded hover:bg-muted text-muted-foreground"
-              disabled={!isStreaming}
-            >
-              Stop
-            </button>
-            {/* Window controls */}
-            <div className="flex items-center ml-2 gap-0.5">
-              <button
-                onClick={() => window.electronAPI?.minimize()}
-                className="w-8 h-7 flex items-center justify-center rounded hover:bg-muted text-muted-foreground transition-colors"
-                aria-label="Minimize"
-              >
-                <svg width="12" height="12" viewBox="0 0 12 12"><rect y="5" width="12" height="1.5" rx="0.75" fill="currentColor"/></svg>
-              </button>
-              <button
-                onClick={() => window.electronAPI?.maximize()}
-                className="w-8 h-7 flex items-center justify-center rounded hover:bg-muted text-muted-foreground transition-colors"
-                aria-label="Maximize"
-              >
-                <svg width="12" height="12" viewBox="0 0 12 12"><rect x="1" y="1" width="10" height="10" rx="1.5" stroke="currentColor" strokeWidth="1.5" fill="none"/></svg>
-              </button>
-              <button
-                onClick={() => window.electronAPI?.close()}
-                className="w-8 h-7 flex items-center justify-center rounded hover:bg-red-500/80 hover:text-white text-muted-foreground transition-colors"
-                aria-label="Close"
-              >
-                <svg width="12" height="12" viewBox="0 0 12 12"><path d="M2 2l8 8M10 2l-8 8" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round"/></svg>
-              </button>
+              {!sidebarOpen && (
+                <button
+                  onClick={() => setSidebarOpen(true)}
+                  className="p-1.5 rounded-md hover:bg-muted text-muted-foreground hover:text-foreground transition-colors"
+                  aria-label="Open sidebar"
+                >
+                  <PanelLeft size={16} />
+                </button>
+              )}
+              {!sidebarOpen && (
+                <span className="text-[13px] font-medium text-muted-foreground">Nono CoWork</span>
+              )}
+              <span className={`text-xs ${connColor}`}>● {connLabel}</span>
             </div>
-          </div>
-        </header>
-
-        {/* Chat area */}
-        <Conversation className="flex-1">
-          <ConversationContent>
-            {messages.length === 0 && !isStreaming && (
-              <div className="flex flex-col items-center justify-center h-full text-muted-foreground gap-2">
-                <p className="text-lg">👋 Ready to chat</p>
-                <p className="text-sm">
-                  Send a message to start a conversation
-                </p>
+            <div
+              className="flex items-center gap-2"
+              style={{ WebkitAppRegion: 'no-drag' } as React.CSSProperties}
+            >
+              <span className="text-xs text-muted-foreground">
+                {sessionStatus.model || "..."}
+              </span>
+              <button
+                onClick={() => handleCommand("reset")}
+                className="text-xs px-2 py-1 rounded hover:bg-muted text-muted-foreground transition-colors"
+                disabled={isStreaming}
+              >
+                Reset
+              </button>
+              <button
+                onClick={() => handleCommand("stop")}
+                className="text-xs px-2 py-1 rounded hover:bg-muted text-muted-foreground transition-colors"
+                disabled={!isStreaming}
+              >
+                Stop
+              </button>
+              {/* Window controls */}
+              <div className="flex items-center ml-2 gap-0.5">
+                <button
+                  onClick={() => window.electronAPI?.minimize()}
+                  className="w-8 h-7 flex items-center justify-center rounded hover:bg-muted text-muted-foreground transition-colors"
+                  aria-label="Minimize"
+                >
+                  <svg width="12" height="12" viewBox="0 0 12 12"><rect y="5" width="12" height="1.5" rx="0.75" fill="currentColor"/></svg>
+                </button>
+                <button
+                  onClick={() => window.electronAPI?.maximize()}
+                  className="w-8 h-7 flex items-center justify-center rounded hover:bg-muted text-muted-foreground transition-colors"
+                  aria-label="Maximize"
+                >
+                  <svg width="12" height="12" viewBox="0 0 12 12"><rect x="1" y="1" width="10" height="10" rx="1.5" stroke="currentColor" strokeWidth="1.5" fill="none"/></svg>
+                </button>
+                <button
+                  onClick={() => window.electronAPI?.close()}
+                  className="w-8 h-7 flex items-center justify-center rounded hover:bg-red-500/80 hover:text-white text-muted-foreground transition-colors"
+                  aria-label="Close"
+                >
+                  <svg width="12" height="12" viewBox="0 0 12 12"><path d="M2 2l8 8M10 2l-8 8" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round"/></svg>
+                </button>
               </div>
-            )}
-            {messages.map((msg) => (
-              <Message key={msg.id} from={msg.role}>
-                <MessageContent>
-                  {msg.role === "assistant" ? (
-                    <>
-                      {msg.reasoning && (
-                        <Reasoning
-                          isStreaming={msg.id === thinkingMsgId && !msg.content}
-                          className="w-full"
-                        >
-                          <ReasoningTrigger />
-                          <ReasoningContent>{msg.reasoning}</ReasoningContent>
-                        </Reasoning>
-                      )}
-                      {msg.parts && msg.parts.length > 0 && (
-                        <PartsRenderer
-                          parts={msg.parts}
-                          isActive={msg.id === thinkingMsgId}
-                        />
-                      )}
-                    </>
-                  ) : (
-                    <p className="whitespace-pre-wrap">{msg.content}</p>
-                  )}
-                </MessageContent>
-              </Message>
-            ))}
-            {isStreaming && !animatingMsgId && !thinkingMsgId && statusText && (
-              <div className="text-sm text-muted-foreground animate-pulse px-1">
-                {statusText}
-              </div>
-            )}
-          </ConversationContent>
-          <ConversationScrollButton />
-        </Conversation>
+            </div>
+          </header>
 
-        {/* Input area */}
-        <div className="p-3">
-          <PromptInput
-            onSubmit={handlePromptSubmit}
-          >
-            <PromptInputTextarea
-              placeholder="Type a message..."
-              value={input}
-              onChange={(e) => setInput(e.currentTarget.value)}
-            />
-            <PromptInputFooter>
-              <div />
-              <PromptInputSubmit
-                disabled={isStreaming || !input.trim()}
-                status={isStreaming ? "streaming" : "ready"}
+          {/* Chat area */}
+          <Conversation className="flex-1">
+            <ConversationContent>
+              {messages.length === 0 && !isStreaming && (
+                <div className="flex flex-col items-center justify-center h-full text-muted-foreground gap-2">
+                  <p className="text-lg">👋 Ready to chat</p>
+                  <p className="text-sm">
+                    Send a message to start a conversation
+                  </p>
+                </div>
+              )}
+              {messages.map((msg) => (
+                <Message key={msg.id} from={msg.role}>
+                  <MessageContent>
+                    {msg.role === "assistant" ? (
+                      <>
+                        {msg.reasoning && (
+                          <Reasoning
+                            isStreaming={msg.id === thinkingMsgId && !msg.content}
+                            className="w-full"
+                          >
+                            <ReasoningTrigger />
+                            <ReasoningContent>{msg.reasoning}</ReasoningContent>
+                          </Reasoning>
+                        )}
+                        {msg.parts && msg.parts.length > 0 && (
+                          <PartsRenderer
+                            parts={msg.parts}
+                            isActive={msg.id === thinkingMsgId}
+                          />
+                        )}
+                      </>
+                    ) : (
+                      <p className="whitespace-pre-wrap">{msg.content}</p>
+                    )}
+                  </MessageContent>
+                </Message>
+              ))}
+              {isStreaming && !animatingMsgId && !thinkingMsgId && statusText && (
+                <div className="text-sm text-muted-foreground animate-pulse px-1">
+                  {statusText}
+                </div>
+              )}
+            </ConversationContent>
+            <ConversationScrollButton />
+          </Conversation>
+
+          {/* Input area */}
+          <div className="p-3">
+            <PromptInput
+              onSubmit={handlePromptSubmit}
+            >
+              <PromptInputTextarea
+                placeholder="Type a message..."
+                value={input}
+                onChange={(e) => setInput(e.currentTarget.value)}
               />
-            </PromptInputFooter>
-          </PromptInput>
-        </div>
-
-        {/* Footer: context bar */}
-        {sessionStatus.active && (
-          <footer className="flex items-center gap-3 px-4 py-1.5 text-xs text-muted-foreground">
-            <div className="flex items-center gap-1.5">
-              <div className="w-24 h-1.5 bg-muted rounded-full overflow-hidden">
-                <div
-                  className={`h-full rounded-full transition-all ${ctxColor}`}
-                  style={{ width: `${ctxPct}%` }}
+              <PromptInputFooter>
+                <div />
+                <PromptInputSubmit
+                  disabled={isStreaming || !input.trim()}
+                  status={isStreaming ? "streaming" : "ready"}
                 />
+              </PromptInputFooter>
+            </PromptInput>
+          </div>
+
+          {/* Footer: context bar */}
+          {sessionStatus.active && (
+            <footer className="flex items-center gap-3 px-4 py-1.5 text-xs text-muted-foreground">
+              <div className="flex items-center gap-1.5">
+                <div className="w-24 h-1.5 bg-muted rounded-full overflow-hidden">
+                  <div
+                    className={`h-full rounded-full transition-all ${ctxColor}`}
+                    style={{ width: `${ctxPct}%` }}
+                  />
+                </div>
+                <span>{ctxPct.toFixed(0)}% context</span>
               </div>
-              <span>{ctxPct.toFixed(0)}% context</span>
-            </div>
-          </footer>
-        )}
+            </footer>
+          )}
+        </div>
       </div>
     </TooltipProvider>
   );
