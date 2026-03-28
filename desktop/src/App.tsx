@@ -39,7 +39,7 @@ import {
   ToolInput,
   ToolOutput,
 } from "@/components/ai-elements/tool";
-import { Sidebar } from "@/components/sidebar";
+import { Sidebar, type SessionItem } from "@/components/sidebar";
 import { PanelLeft } from "lucide-react";
 
 // ── Types ──
@@ -169,6 +169,7 @@ function App() {
   // Track which assistant message is actively receiving thought events
   const [thinkingMsgId, setThinkingMsgId] = useState<string | null>(null);
   const [sidebarOpen, setSidebarOpen] = useState(true);
+  const [sessionList, setSessionList] = useState<SessionItem[]>([]);
 
   // Health check on mount
   useEffect(() => {
@@ -209,6 +210,63 @@ function App() {
       // ignore
     }
   }, []);
+
+  // Fetch session list for sidebar
+  const fetchSessions = useCallback(async () => {
+    try {
+      const res = await fetch(`${API_BASE}/api/sessions`, { headers: authHeaders() });
+      const data = await res.json();
+      setSessionList(data.sessions || []);
+    } catch {
+      // ignore
+    }
+  }, []);
+
+  // Switch to a different conversation
+  const handleSwitchSession = useCallback(async (sessionId: string) => {
+    if (isStreaming) return;
+    try {
+      const switchRes = await fetch(`${API_BASE}/api/sessions/${sessionId}/switch`, {
+        method: "PUT",
+        headers: authHeaders(),
+      });
+      if (!switchRes.ok) return;
+
+      // Load the switched session's messages
+      const currentRes = await fetch(`${API_BASE}/api/sessions/current`, {
+        headers: authHeaders(),
+      });
+      const data = await currentRes.json();
+
+      // Convert backend messages to frontend ChatMessage format
+      const msgs: ChatMessage[] = [];
+      let counter = 0;
+      for (const msg of data.messages || []) {
+        if (msg.role === "user") {
+          msgs.push({ id: `hist-${++counter}`, role: "user", content: msg.content || "" });
+        } else if (msg.role === "assistant" && msg.content) {
+          msgs.push({
+            id: `hist-${++counter}`,
+            role: "assistant",
+            content: msg.content,
+            reasoning: msg.reasoning_content || undefined,
+          });
+        }
+      }
+
+      idCounter.current = counter;
+      setMessages(msgs);
+      refreshStatus();
+      fetchSessions();
+    } catch {
+      // ignore
+    }
+  }, [isStreaming, refreshStatus, fetchSessions]);
+
+  // Load session list on mount
+  useEffect(() => {
+    fetchSessions();
+  }, [fetchSessions]);
 
   // Send message — called by PromptInput onSubmit with { text, files }
   const handleSubmit = useCallback(async () => {
@@ -347,36 +405,10 @@ function App() {
       setThinkingMsgId(null);
       setStatusText("");
       refreshStatus();
+      fetchSessions();
     }
-  }, [isStreaming, nextId, refreshStatus]);
+  }, [isStreaming, nextId, refreshStatus, fetchSessions]);
 
-  // Slash commands
-  const handleCommand = useCallback(
-    async (cmd: string) => {
-      try {
-        const res = await fetch(`${API_BASE}/api/command/${cmd}`, {
-          method: "POST",
-          headers: authHeaders({ "Content-Type": "application/json" }),
-          body: JSON.stringify({}),
-        });
-        const data = await res.json();
-
-        if (cmd === "reset") {
-          setMessages([]);
-        }
-
-        if (data.result) {
-          setStatusText(data.result);
-          setTimeout(() => setStatusText(""), 5000);
-        }
-
-        refreshStatus();
-      } catch {
-        setStatusText(`❌ Failed to execute /${cmd}`);
-      }
-    },
-    [refreshStatus]
-  );
 
   // Connection indicator color
   const connColor =
@@ -413,7 +445,19 @@ function App() {
         <Sidebar
           isOpen={sidebarOpen}
           onToggle={() => setSidebarOpen((p) => !p)}
-          onNewChat={() => { handleCommand("new"); setMessages([]); }}
+          sessions={sessionList}
+          onSelectSession={handleSwitchSession}
+          onNewChat={async () => {
+            try {
+              await fetch(`${API_BASE}/api/sessions`, {
+                method: "POST",
+                headers: authHeaders(),
+              });
+              setMessages([]);
+              refreshStatus();
+              fetchSessions();
+            } catch { /* ignore */ }
+          }}
         />
 
         {/* Main content */}
@@ -445,23 +489,6 @@ function App() {
               className="flex items-center gap-2"
               style={{ WebkitAppRegion: 'no-drag' } as React.CSSProperties}
             >
-              <span className="text-xs text-muted-foreground">
-                {sessionStatus.model || "..."}
-              </span>
-              <button
-                onClick={() => handleCommand("reset")}
-                className="text-xs px-2 py-1 rounded hover:bg-muted text-muted-foreground transition-colors"
-                disabled={isStreaming}
-              >
-                Reset
-              </button>
-              <button
-                onClick={() => handleCommand("stop")}
-                className="text-xs px-2 py-1 rounded hover:bg-muted text-muted-foreground transition-colors"
-                disabled={!isStreaming}
-              >
-                Stop
-              </button>
               {/* Window controls */}
               <div className="flex items-center ml-2 gap-0.5">
                 <button
@@ -549,8 +576,16 @@ function App() {
               <PromptInputFooter>
                 <div />
                 <PromptInputSubmit
-                  disabled={isStreaming || !input.trim()}
+                  className="cursor-pointer"
+                  disabled={!isStreaming && !input.trim()}
                   status={isStreaming ? "streaming" : "ready"}
+                  onStop={() => {
+                    fetch(`${API_BASE}/api/command/stop`, {
+                      method: "POST",
+                      headers: authHeaders({ "Content-Type": "application/json" }),
+                      body: JSON.stringify({}),
+                    }).catch(() => {});
+                  }}
                 />
               </PromptInputFooter>
             </PromptInput>
