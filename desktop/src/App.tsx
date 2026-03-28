@@ -67,6 +67,89 @@ interface ChatMessage {
   parts?: MessagePart[];
 }
 
+// ── History Converter ──
+// Converts backend OpenAI-format history into frontend ChatMessage[] with parts[]
+
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+function convertHistoryToMessages(backendMessages: any[]): { messages: ChatMessage[]; counter: number } {
+  const msgs: ChatMessage[] = [];
+  let counter = 0;
+
+  // Pre-index tool results by tool_call_id for O(1) lookup
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const toolResultMap = new Map<string, any>();
+  for (const msg of backendMessages) {
+    if (msg.role === "tool" && msg.tool_call_id) {
+      toolResultMap.set(msg.tool_call_id, msg);
+    }
+  }
+
+  for (const msg of backendMessages) {
+    if (msg.role === "user") {
+      msgs.push({
+        id: `hist-${++counter}`,
+        role: "user",
+        content: msg.content || "",
+      });
+    } else if (msg.role === "assistant") {
+      const parts: MessagePart[] = [];
+
+      // 1. Text content → text part
+      if (msg.content) {
+        parts.push({ type: "text", content: msg.content });
+      }
+
+      // 2. Tool calls → tool_call parts + matched tool_result parts
+      if (msg.tool_calls && Array.isArray(msg.tool_calls)) {
+        for (const tc of msg.tool_calls) {
+          const fn = tc.function || {};
+          const toolName = fn.name || "unknown";
+          let args: Record<string, unknown> = {};
+          try {
+            args = JSON.parse(fn.arguments || "{}");
+          } catch {
+            // arguments might not be valid JSON
+          }
+
+          parts.push({
+            type: "tool_call",
+            toolName,
+            args,
+            round: 0,
+          });
+
+          // Match tool result by tool_call_id
+          const toolResult = toolResultMap.get(tc.id);
+          if (toolResult) {
+            let result = toolResult.content || "";
+            // Truncate large results for display (consistent with SSE streaming)
+            if (result.length > 500) {
+              result = result.slice(0, 500) + `… (${result.length} chars)`;
+            }
+            parts.push({
+              type: "tool_result",
+              toolName,
+              result,
+              round: 0,
+            });
+          }
+        }
+      }
+
+      msgs.push({
+        id: `hist-${++counter}`,
+        role: "assistant",
+        content: msg.content || "",
+        reasoning: msg.reasoning_content || undefined,
+        parts: parts.length > 0 ? parts : undefined,
+      });
+    }
+    // role === "tool" consumed via toolResultMap — skip
+  }
+
+  return { messages: msgs, counter };
+}
+
 interface SessionStatus {
   active: boolean;
   model?: string;
@@ -100,9 +183,11 @@ function authHeaders(extra: Record<string, string> = {}): Record<string, string>
 function PartsRenderer({
   parts,
   isActive,
+  defaultCollapsed = false,
 }: {
   parts: MessagePart[];
   isActive: boolean;
+  defaultCollapsed?: boolean;
 }) {
   const items: React.ReactNode[] = [];
   let i = 0;
@@ -135,8 +220,11 @@ function PartsRenderer({
         toolState = "input-streaming";
       }
 
+      // Historical messages: collapsed by default; live streaming: auto-expand
+      const shouldOpen = defaultCollapsed ? false : toolState === "output-available";
+
       items.push(
-        <Tool key={`t-${i}`} defaultOpen={toolState === "output-available"}>
+        <Tool key={`t-${i}`} defaultOpen={shouldOpen}>
           <ToolHeader
             title={part.toolName || "tool"}
             type={`tool-${part.toolName || "unknown"}` as `tool-${string}`}
@@ -170,6 +258,7 @@ function App() {
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [input, setInput] = useState("");
   const [isStreaming, setIsStreaming] = useState(false);
+  const [loadingSession, setLoadingSession] = useState(false);
   const [statusText, setStatusText] = useState("");
   const [sessionStatus, setSessionStatus] = useState<SessionStatus>({
     active: false,
@@ -239,34 +328,26 @@ function App() {
   // Switch to a different conversation
   const handleSwitchSession = useCallback(async (sessionId: string) => {
     if (isStreaming) return;
+
+    // Show skeleton immediately for instant visual feedback
+    setLoadingSession(true);
+    setMessages([]);
+
     try {
-      const switchRes = await fetch(`${API_BASE}/api/sessions/${sessionId}/switch`, {
+      // Single request: switch endpoint now returns session data inline
+      const res = await fetch(`${API_BASE}/api/sessions/${sessionId}/switch`, {
         method: "PUT",
         headers: authHeaders(),
       });
-      if (!switchRes.ok) return;
+      if (!res.ok) {
+        setLoadingSession(false);
+        return;
+      }
 
-      // Load the switched session's messages
-      const currentRes = await fetch(`${API_BASE}/api/sessions/current`, {
-        headers: authHeaders(),
-      });
-      const data = await currentRes.json();
+      const data = await res.json();
 
       // Convert backend messages to frontend ChatMessage format
-      const msgs: ChatMessage[] = [];
-      let counter = 0;
-      for (const msg of data.messages || []) {
-        if (msg.role === "user") {
-          msgs.push({ id: `hist-${++counter}`, role: "user", content: msg.content || "" });
-        } else if (msg.role === "assistant" && msg.content) {
-          msgs.push({
-            id: `hist-${++counter}`,
-            role: "assistant",
-            content: msg.content,
-            reasoning: msg.reasoning_content || undefined,
-          });
-        }
-      }
+      const { messages: msgs, counter } = convertHistoryToMessages(data.messages || []);
 
       idCounter.current = counter;
       setMessages(msgs);
@@ -274,6 +355,8 @@ function App() {
       fetchSessions();
     } catch {
       // ignore
+    } finally {
+      setLoadingSession(false);
     }
   }, [isStreaming, refreshStatus, fetchSessions]);
 
@@ -526,7 +609,33 @@ function App() {
           {/* Chat area */}
           <Conversation className="flex-1">
             <ConversationContent>
-              {messages.length === 0 && !isStreaming && (
+              {/* Skeleton loading for session switch */}
+              {loadingSession && (
+                <div className="flex flex-col gap-5 py-4 animate-pulse">
+                  {/* User message skeleton */}
+                  <div className="flex justify-end">
+                    <div className="rounded-lg bg-secondary/60 h-10 w-[45%]"></div>
+                  </div>
+                  {/* Assistant message skeleton */}
+                  <div className="flex flex-col gap-2.5 w-[75%]">
+                    <div className="rounded bg-muted/50 h-3.5 w-full"></div>
+                    <div className="rounded bg-muted/50 h-3.5 w-[92%]"></div>
+                    <div className="rounded bg-muted/50 h-3.5 w-[60%]"></div>
+                  </div>
+                  {/* User message skeleton */}
+                  <div className="flex justify-end">
+                    <div className="rounded-lg bg-secondary/60 h-8 w-[35%]"></div>
+                  </div>
+                  {/* Assistant message skeleton */}
+                  <div className="flex flex-col gap-2.5 w-[80%]">
+                    <div className="rounded bg-muted/50 h-3.5 w-full"></div>
+                    <div className="rounded bg-muted/50 h-3.5 w-[85%]"></div>
+                    <div className="rounded bg-muted/40 h-3.5 w-[70%]"></div>
+                    <div className="rounded bg-muted/30 h-3.5 w-[45%]"></div>
+                  </div>
+                </div>
+              )}
+              {messages.length === 0 && !isStreaming && !loadingSession && (
                 <div className="flex flex-col items-center justify-center h-full text-muted-foreground gap-2">
                   <p className="text-lg">👋 Ready to chat</p>
                   <p className="text-sm">
@@ -552,6 +661,7 @@ function App() {
                           <PartsRenderer
                             parts={msg.parts}
                             isActive={msg.id === thinkingMsgId}
+                            defaultCollapsed={msg.id.startsWith("hist-")}
                           />
                         )}
                       </>

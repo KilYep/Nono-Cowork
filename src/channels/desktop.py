@@ -346,7 +346,11 @@ async def get_current_session():
 
 @app.put("/api/sessions/{session_id}/switch")
 async def switch_session(session_id: str):
-    """Switch to a different saved session."""
+    """Switch to a different saved session.
+
+    Returns the switched session's messages inline so the frontend
+    doesn't need a separate GET /sessions/current call.
+    """
     lock = sessions.get_lock(DESKTOP_USER_ID)
     if not lock.acquire(blocking=False):
         return JSONResponse(
@@ -363,7 +367,23 @@ async def switch_session(session_id: str):
             {"error": f"Session '{session_id}' not found"},
             status_code=404,
         )
-    return {"message": f"Switched to session {session_id}"}
+
+    # Return session data inline (same shape as GET /sessions/current)
+    session = sessions.get_or_create(DESKTOP_USER_ID)
+    info = sessions.get_status(DESKTOP_USER_ID)
+    raw_history = _serialize_history(session["history"])
+    display_messages = [msg for msg in raw_history if msg.get("role") != "system"]
+
+    return {
+        "message": f"Switched to session {session_id}",
+        "id": session["session_id"],
+        "messages": display_messages,
+        "model": session.get("model_override") or MODEL,
+        "created_at": session["created_at"],
+        "last_active": session["last_active"],
+        "token_stats": dict(session["token_stats"]),
+        "is_running": info["is_running"] if info else False,
+    }
 
 
 @app.delete("/api/sessions/{session_id}")
