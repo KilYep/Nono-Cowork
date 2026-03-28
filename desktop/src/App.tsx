@@ -40,6 +40,16 @@ import {
   ToolOutput,
 } from "@/components/ai-elements/tool";
 import { Sidebar, type SessionItem } from "@/components/sidebar";
+import {
+  Context,
+  ContextTrigger,
+  ContextContent,
+  ContextContentHeader,
+  ContextContentBody,
+  ContextInputUsage,
+  ContextOutputUsage,
+  ContextCacheUsage,
+} from "@/components/ai-elements/context";
 import { PanelLeft } from "lucide-react";
 
 // ── Types ──
@@ -63,6 +73,10 @@ interface SessionStatus {
   context_pct?: number;
   prompt_tokens?: number;
   context_limit?: number;
+  total_tokens?: number;
+  total_prompt_tokens?: number;
+  total_completion_tokens?: number;
+  total_cached_tokens?: number;
   is_running?: boolean;
 }
 
@@ -424,14 +438,7 @@ function App() {
         ? "Disconnected"
         : "Connecting...";
 
-  // Context bar
-  const ctxPct = sessionStatus.context_pct ?? 0;
-  const ctxColor =
-    ctxPct < 50
-      ? "bg-green-500"
-      : ctxPct < 80
-        ? "bg-yellow-500"
-        : "bg-red-500";
+
 
   // PromptInput onSubmit handler — receives { text, files } from the component
   const handlePromptSubmit = useCallback(async () => {
@@ -574,7 +581,37 @@ function App() {
                 onChange={(e) => setInput(e.currentTarget.value)}
               />
               <PromptInputFooter>
-                <div />
+                {sessionStatus.active && (sessionStatus.prompt_tokens ?? 0) > 0 ? (
+                  <Context
+                    usedTokens={sessionStatus.prompt_tokens ?? 0}
+                    maxTokens={sessionStatus.context_limit ?? 200000}
+                    modelId={sessionStatus.model?.replace('/', ':') ?? ''}
+                    usage={{
+                      inputTokens: sessionStatus.total_prompt_tokens ?? 0,
+                      outputTokens: sessionStatus.total_completion_tokens ?? 0,
+                      totalTokens: sessionStatus.total_tokens ?? 0,
+                      cachedInputTokens: sessionStatus.total_cached_tokens ?? 0,
+                      inputTokenDetails: { cacheReadTokens: sessionStatus.total_cached_tokens ?? 0, noCacheTokens: undefined, cacheWriteTokens: undefined },
+                      outputTokenDetails: { textTokens: undefined, reasoningTokens: undefined },
+                    }}
+                  >
+                    <ContextTrigger className="h-6 px-1.5 text-[11px] text-muted-foreground/60" />
+                    <ContextContent side="top" align="start">
+                      <ContextContentHeader />
+                      <ContextContentBody className="space-y-1">
+                        <ContextInputUsage />
+                        <ContextOutputUsage />
+                        <ContextCacheUsage />
+                      </ContextContentBody>
+                    </ContextContent>
+                  </Context>
+                ) : (
+                  sessionStatus.model && (
+                    <span className="text-[11px] text-muted-foreground/50">
+                      {sessionStatus.model.split('/').pop()}
+                    </span>
+                  )
+                )}
                 <PromptInputSubmit
                   className="cursor-pointer"
                   disabled={!isStreaming && !input.trim()}
@@ -590,21 +627,6 @@ function App() {
               </PromptInputFooter>
             </PromptInput>
           </div>
-
-          {/* Footer: context bar */}
-          {sessionStatus.active && (
-            <footer className="flex items-center gap-3 px-4 py-1.5 text-xs text-muted-foreground">
-              <div className="flex items-center gap-1.5">
-                <div className="w-24 h-1.5 bg-muted rounded-full overflow-hidden">
-                  <div
-                    className={`h-full rounded-full transition-all ${ctxColor}`}
-                    style={{ width: `${ctxPct}%` }}
-                  />
-                </div>
-                <span>{ctxPct.toFixed(0)}% context</span>
-              </div>
-            </footer>
-          )}
         </div>
       </div>
     </TooltipProvider>
