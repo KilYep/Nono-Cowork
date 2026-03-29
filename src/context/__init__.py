@@ -28,10 +28,15 @@ import threading
 _local = threading.local()
 
 
-def set_context(user_id: str, channel_name: str):
+def set_context(user_id: str, channel_name: str,
+                check_stop=None, status_func=None,
+                subagent_check_stop=None):
     """Set the execution context for the current thread."""
     _local.user_id = user_id
     _local.channel_name = channel_name
+    _local.check_stop = check_stop
+    _local.status_func = status_func
+    _local.subagent_check_stop = subagent_check_stop
 
 
 def get_context() -> dict:
@@ -39,7 +44,13 @@ def get_context() -> dict:
     user_id = getattr(_local, "user_id", None)
     channel_name = getattr(_local, "channel_name", None)
     if user_id and channel_name:
-        return {"user_id": user_id, "channel_name": channel_name}
+        return {
+            "user_id": user_id,
+            "channel_name": channel_name,
+            "check_stop": getattr(_local, "check_stop", None),
+            "status_func": getattr(_local, "status_func", None),
+            "subagent_check_stop": getattr(_local, "subagent_check_stop", None),
+        }
     return {}
 
 
@@ -47,3 +58,6 @@ def clear_context():
     """Clear the execution context for the current thread."""
     _local.user_id = None
     _local.channel_name = None
+    _local.check_stop = None
+    _local.status_func = None
+    _local.subagent_check_stop = None

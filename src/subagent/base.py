@@ -30,16 +30,21 @@ class SubagentProvider(ABC):
         task: str,
         system_prompt: str = "",
         working_dir: str = "~",
+        model: str = "",
+        check_stop=None,
+        timeout: int = 300,
     ) -> str:
         """Execute a task and return the result text.
 
-        Blocks until the subagent completes. No hard timeout — the subagent
-        has its own MAX_ROUNDS / turn limits as a natural safeguard.
+        Blocks until the subagent completes or is stopped/timed out.
 
         Args:
             task: Task description / instructions for the subagent.
             system_prompt: Optional system prompt. Empty = use provider's default.
             working_dir: Working directory for the subagent.
+            model: Optional model override. Empty = use provider's default.
+            check_stop: Optional callable returning True if user requested stop.
+            timeout: Hard time limit in seconds (default 300 = 5 minutes).
 
         Returns:
             The subagent's final text response.

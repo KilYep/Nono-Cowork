@@ -15,6 +15,7 @@ import os
 import logging
 from tools.registry import tool
 from subagent import get_provider, list_providers
+from context import get_context
 
 logger = logging.getLogger("tools.delegate")
 
@@ -30,7 +31,7 @@ logger = logging.getLogger("tools.delegate")
         "- Tasks you want to isolate from the current conversation context\n\n"
         "The sub-agent has NO knowledge of your current conversation — include "
         "all necessary context in the task and context fields.\n\n"
-        "This call blocks until the sub-agent finishes. "
+        "This call blocks until the sub-agent finishes (max 5 minutes). "
         "Do NOT delegate simple tasks you can handle in 2-3 rounds yourself."
     ),
     parameters={
@@ -64,6 +65,23 @@ logger = logging.getLogger("tools.delegate")
                     "Only set this when you need to enforce specific behavior constraints."
                 ),
             },
+            "provider": {
+                "type": "string",
+                "description": (
+                    "Which sub-agent provider to use. Leave empty for auto-select (recommended). "
+                    "Options: 'gemini-cli' (powerful, isolated process), "
+                    "'self' (uses own agent loop, always available)."
+                ),
+            },
+            "model": {
+                "type": "string",
+                "description": (
+                    "Model for the sub-agent. Leave empty for provider's default (gemini-2.5-pro). "
+                    "For gemini-cli: Gemini model names (e.g. 'gemini-2.5-flash', 'gemini-2.5-pro', "
+                    "'gemini-3-flash-preview', 'gemini-3.1-pro-preview'). "
+                    "For self: LiteLLM format (e.g. 'gemini/gemini-2.5-pro', 'deepseek/deepseek-chat')."
+                ),
+            },
         },
         "required": ["task"],
     },
@@ -72,6 +90,8 @@ def delegate(
     task: str,
     context: str = "",
     working_dir: str = "~",
+    provider: str = "",
+    model: str = "",
     system_prompt: str = "",
 ) -> str:
     """Delegate a task to a subagent and return its result."""
@@ -80,16 +100,35 @@ def delegate(
     else:
         full_task = task
 
-    provider = get_provider()
-    logger.info("Delegating to '%s': %s", provider.name, task[:80])
+    selected = get_provider(name=provider if provider else None)
 
-    result = provider.run(
-        task=full_task,
-        system_prompt=system_prompt,
-        working_dir=working_dir,
-    )
+    # Pull callbacks from execution context
+    ctx = get_context()
+    # Use subagent_check_stop: triggers on EITHER subagent-only stop OR full stop
+    subagent_check_stop = ctx.get("subagent_check_stop")
+    status_func = ctx.get("status_func")
+    user_id = ctx.get("user_id")
 
-    return f"[Subagent: {provider.name}]\n\n{result}"
+    logger.info("Delegating to '%s' (model=%s): %s", selected.name, model or "default", task[:80])
+    if status_func:
+        status_func(f"🤖 Delegating to {selected.name}...")
+
+    try:
+        result = selected.run(
+            task=full_task,
+            system_prompt=system_prompt,
+            working_dir=working_dir,
+            model=model,
+            check_stop=subagent_check_stop,
+        )
+    finally:
+        # Clear subagent stop flag so main agent can continue normally
+        # (only relevant when user clicked "Stop Subagent", not full stop)
+        if user_id:
+            from session import sessions
+            sessions.clear_subagent_stop(user_id)
+
+    return f"[Subagent: {selected.name}]\n\n{result}"
 
 
 @tool(
