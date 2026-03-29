@@ -454,6 +454,9 @@ async def command(cmd: str, request: Request):
     """
     body = await request.json() if request.headers.get("content-length", "0") != "0" else {}
     args = body.get("args", "")
+    # Support {scope: "delegate"} as shorthand for args="delegate" in /stop
+    if not args and "scope" in body:
+        args = body["scope"]
 
     handler = SLASH_COMMANDS.get(cmd)
     if not handler:
@@ -472,6 +475,13 @@ async def command(cmd: str, request: Request):
             responses.append(text)
 
     handler[0](_CaptureChannel(), DESKTOP_USER_ID, args)
+
+    # For stop commands: also push event to the SSE stream so frontend
+    # gets instant feedback without waiting for the agent to finish
+    if cmd == "stop":
+        scope = args.strip().lower() if args else "all"
+        channel._push_event(DESKTOP_USER_ID, "stopping", {"scope": scope})
+
     return {"result": "\n".join(responses)}
 
 

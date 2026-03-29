@@ -146,6 +146,7 @@ class SessionManager:
             "created_at": time.time(),
             "last_active": time.time(),
             "stop_flag": threading.Event(),
+            "subagent_stop_flag": threading.Event(),
             "model_override": None,
         }
         logger.info("Created new session %s for user %s", session_id, user_id)
@@ -244,6 +245,7 @@ class SessionManager:
             "created_at": data.get("created_at", time.time()),
             "last_active": data.get("last_active", time.time()),
             "stop_flag": threading.Event(),
+            "subagent_stop_flag": threading.Event(),
             "model_override": data.get("model_override"),
         }
 
@@ -305,6 +307,31 @@ class SessionManager:
             session = self._sessions.get(user_id)
             if session:
                 session["stop_flag"].clear()
+                session["subagent_stop_flag"].clear()
+
+    def request_subagent_stop(self, user_id: str) -> bool:
+        """Signal only the running subagent to stop. Main agent continues."""
+        with self._global_lock:
+            session = self._sessions.get(user_id)
+            if session:
+                session["subagent_stop_flag"].set()
+                return True
+            return False
+
+    def is_subagent_stopped(self, user_id: str) -> bool:
+        """Check if subagent stop has been requested."""
+        with self._global_lock:
+            session = self._sessions.get(user_id)
+            if session:
+                return session["subagent_stop_flag"].is_set()
+            return False
+
+    def clear_subagent_stop(self, user_id: str):
+        """Clear the subagent stop flag (called after delegate returns)."""
+        with self._global_lock:
+            session = self._sessions.get(user_id)
+            if session:
+                session["subagent_stop_flag"].clear()
 
     def set_model(self, user_id: str, model: str | None):
         """Set or clear a per-session model override."""

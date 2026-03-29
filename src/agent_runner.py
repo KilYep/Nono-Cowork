@@ -38,8 +38,13 @@ def run_agent_for_message(user_id: str, user_text: str,
         reply_func("⏳ The previous task is still running. Please wait for it to finish.")
         return
 
-    # Set execution context so tools can access user_id and channel_name
-    set_context(user_id=user_id, channel_name=channel_name)
+    # Set execution context so tools can access user_id, channel_name, and callbacks
+    set_context(user_id=user_id, channel_name=channel_name,
+                check_stop=lambda: sessions.is_stopped(user_id),
+                status_func=status_func,
+                subagent_check_stop=lambda: (
+                    sessions.is_subagent_stopped(user_id) or sessions.is_stopped(user_id)
+                ))
 
     # Clear any previous stop flag before starting
     sessions.clear_stop(user_id)
@@ -53,21 +58,25 @@ def run_agent_for_message(user_id: str, user_text: str,
 
         # Augment user message with recent file sync context (if any)
         sync_ctx = get_sync_context()
-        augmented_text = f"{sync_ctx}\n\n{user_text}" if sync_ctx else user_text
 
         # Log to journalctl for live debugging
         logger.info("[%s] User: %s", channel_name, user_text)
         if sync_ctx:
             logger.info("[%s] Sync context injected:\n%s", channel_name, sync_ctx)
 
-        # Append augmented message to history (sync context visible to LLM)
-        history.append({"role": "user", "content": augmented_text})
-        # Log the original text (without injected context) to session log file
+        # Append ORIGINAL user message to history (this is what gets persisted & shown in frontend)
+        history.append({"role": "user", "content": user_text})
+        # Log the original text to session log file
         log_event(log_file, {
             "type": f"{channel_name}_message",
             "user_id": user_id,
             "content": user_text,
         })
+
+        # Temporarily inject sync context into the last user message for the LLM call only
+        if sync_ctx:
+            augmented_text = f"{sync_ctx}\n\n{user_text}"
+            history[-1] = {"role": "user", "content": augmented_text}
 
         # Agent event collector
         events = []
@@ -100,6 +109,14 @@ def run_agent_for_message(user_id: str, user_text: str,
                 check_stop=check_stop,
                 model_override=model_override,
             )
+
+            # Restore original user message (strip sync context before persisting)
+            if sync_ctx:
+                for msg in updated_history:
+                    if msg.get("role") == "user" and msg.get("content") == augmented_text:
+                        msg["content"] = user_text
+                        break
+
             session["history"] = updated_history
             session["token_stats"] = updated_stats
 

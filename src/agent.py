@@ -218,6 +218,13 @@ def agent_loop(history: list[dict], log_file=None, token_stats: dict = None,
             usage = None
 
             for chunk in stream:
+                # Check for stop during streaming (so user doesn't have to wait
+                # for the entire LLM response to finish)
+                if check_stop and check_stop():
+                    print("\n🛑 Stop requested — aborting LLM stream")
+                    _stopped = True
+                    break
+
                 delta = chunk.choices[0].delta if chunk.choices else None
 
                 # Capture usage from the final chunk (may not exist on all chunks)

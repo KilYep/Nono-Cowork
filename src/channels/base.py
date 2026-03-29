@@ -89,11 +89,24 @@ def _cmd_status(channel, user_id: str, args: str):
 
 
 def _cmd_stop(channel, user_id: str, args: str):
-    """Stop the currently running agent task."""
-    if sessions.request_stop(OWNER_USER_ID):
-        channel.send_status(user_id, "🛑 Stop requested. The agent will halt after the current step.")
+    """Stop the currently running agent task.
+
+    Args can include scope:
+      - "delegate" → only stop the running subagent, main agent continues
+      - anything else or empty → stop everything (default)
+    """
+    scope = args.strip().lower() if args else ""
+
+    if scope == "delegate":
+        if sessions.request_subagent_stop(OWNER_USER_ID):
+            channel.send_status(user_id, "🛑 Stopping sub-agent... Main agent will continue.")
+        else:
+            channel.send_status(user_id, "ℹ️ No active session.")
     else:
-        channel.send_status(user_id, "ℹ️ No active session to stop.")
+        if sessions.request_stop(OWNER_USER_ID):
+            channel.send_status(user_id, "🛑 Stop requested. The agent will halt after the current step.")
+        else:
+            channel.send_status(user_id, "ℹ️ No active session to stop.")
 
 
 def _cmd_compact(channel, user_id: str, args: str):

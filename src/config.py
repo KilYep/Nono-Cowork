@@ -10,9 +10,13 @@ load_dotenv()
 # ── Model ──
 MODEL_POOL = [
     "dashscope/qwen3.5-plus",
-    "gemini/gemini-2.5-flash",
+    "dashscope/minimax-m2.7",
     "gemini/gemini-2.5-pro",
+    "gemini/gemini-3.1-pro-preview",
+    "gemini/gemini-3-flash-preview",
     "anthropic/claude-sonnet-4-20250514",
+    "openai/gpt-5.1",
+    "moonshotai/kimi-k2",
     "deepseek/deepseek-chat",
 ]
 MODEL = os.getenv("MODEL", "dashscope/qwen3.5-plus")
