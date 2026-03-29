@@ -39,7 +39,9 @@ import {
   ToolInput,
   ToolOutput,
 } from "@/components/ai-elements/tool";
-import { Sidebar, type SessionItem } from "@/components/sidebar";
+import { Sidebar, type SessionItem, type SidebarView } from "@/components/sidebar";
+import { type Notification } from "@/components/notification-card";
+import { WorkspacePage } from "@/components/workspace-page";
 import {
   Context,
   ContextTrigger,
@@ -343,6 +345,11 @@ function App() {
   const [modelSelectorOpen, setModelSelectorOpen] = useState(false);
   // Track whether a stop request has been sent (for immediate UI feedback)
   const [isStopping, setIsStopping] = useState(false);
+  // View mode: chat or workspace
+  const [activeView, setActiveView] = useState<SidebarView>("chat");
+  // Notifications (Workspace)
+  const [notifications, setNotifications] = useState<Notification[]>([]);
+  const [unreadCount, setUnreadCount] = useState(0);
 
   // Health check on mount
   useEffect(() => {
@@ -461,11 +468,150 @@ function App() {
     }
   }, [isStreaming, refreshStatus, fetchSessions]);
 
-  // Load session list and models on mount
+  // ── Notifications ──
+
+  const fetchNotifications = useCallback(async () => {
+    try {
+      const res = await fetch(`${API_BASE}/api/notifications`, { headers: authHeaders() });
+      const data = await res.json();
+      setNotifications(data.notifications || []);
+      setUnreadCount(data.unread_count ?? 0);
+    } catch {
+      // ignore
+    }
+  }, []);
+
+  const handleNotificationClick = useCallback(async (notification: Notification) => {
+    if (isStreaming) return;
+
+    // Mark as read (fire-and-forget)
+    if (notification.status === "unread") {
+      fetch(`${API_BASE}/api/notifications/${notification.id}/read`, {
+        method: "PUT",
+        headers: authHeaders(),
+      }).catch(() => {});
+    }
+
+    // Load the autonomous session
+    setLoadingSession(true);
+    setMessages([]);
+    setIsStopping(false);
+
+    try {
+      // Try notification-specific session endpoint first
+      const res = await fetch(`${API_BASE}/api/notifications/${notification.id}/session`, {
+        headers: authHeaders(),
+      });
+
+      if (res.ok) {
+        const data = await res.json();
+        const { messages: msgs, counter } = convertHistoryToMessages(data.messages || data.history || []);
+        idCounter.current = counter;
+        setMessages(msgs);
+        refreshStatus();
+      } else if (notification.session_id) {
+        // Fallback: try regular session switch
+        await handleSwitchSession(notification.session_id);
+      }
+    } catch {
+      // Fallback: try regular session switch
+      if (notification.session_id) {
+        try { await handleSwitchSession(notification.session_id); } catch { /* ignore */ }
+      }
+    } finally {
+      setLoadingSession(false);
+    }
+
+    // Refresh notifications to update read status
+    fetchNotifications();
+  }, [isStreaming, handleSwitchSession, fetchNotifications, refreshStatus]);
+
+  const handleMarkAllRead = useCallback(async () => {
+    try {
+      await fetch(`${API_BASE}/api/notifications/read-all`, {
+        method: "PUT",
+        headers: authHeaders(),
+      });
+      fetchNotifications();
+    } catch {
+      // ignore
+    }
+  }, [fetchNotifications]);
+
+  // Load session list, models, and notifications on mount
   useEffect(() => {
     fetchSessions();
     fetchModels();
-  }, [fetchSessions, fetchModels]);
+    fetchNotifications();
+  }, [fetchSessions, fetchModels, fetchNotifications]);
+
+  // SSE: real-time notification stream
+  useEffect(() => {
+    const url = `${API_BASE}/api/notifications/stream`;
+    const headers = API_TOKEN ? { Authorization: `Bearer ${API_TOKEN}` } : undefined;
+
+    // EventSource doesn't support custom headers natively,
+    // so we use fetch-based SSE if token is needed, otherwise native EventSource
+    if (!headers) {
+      const es = new EventSource(url);
+      es.addEventListener("new_notification", (e) => {
+        try {
+          const notif = JSON.parse(e.data) as Notification;
+          setNotifications((prev) => [notif, ...prev]);
+          setUnreadCount((prev) => prev + 1);
+        } catch { /* ignore */ }
+      });
+      es.addEventListener("notification_update", () => {
+        fetchNotifications();
+      });
+      return () => es.close();
+    }
+
+    // Fetch-based SSE with auth header
+    const controller = new AbortController();
+    (async () => {
+      try {
+        const res = await fetch(url, {
+          headers: authHeaders(),
+          signal: controller.signal,
+        });
+        const reader = res.body?.getReader();
+        if (!reader) return;
+        const decoder = new TextDecoder();
+        let buffer = "";
+        let eventType = "";
+
+        while (true) {
+          const { done, value } = await reader.read();
+          if (done) break;
+          buffer += decoder.decode(value, { stream: true });
+          const lines = buffer.split("\n");
+          buffer = lines.pop() || "";
+
+          for (const line of lines) {
+            if (line.startsWith("event:")) {
+              eventType = line.slice(6).trim();
+            } else if (line.startsWith("data:")) {
+              const dataStr = line.slice(5).trim();
+              if (!dataStr) continue;
+              try {
+                if (eventType === "new_notification") {
+                  const notif = JSON.parse(dataStr) as Notification;
+                  setNotifications((prev) => [notif, ...prev]);
+                  setUnreadCount((prev) => prev + 1);
+                } else if (eventType === "notification_update") {
+                  fetchNotifications();
+                }
+              } catch { /* ignore */ }
+            }
+          }
+        }
+      } catch {
+        // Connection closed or aborted
+      }
+    })();
+    return () => controller.abort();
+  }, [fetchNotifications]);
 
   // Send message — called by PromptInput onSubmit with { text, files }
   const handleSubmit = useCallback(async () => {
@@ -626,7 +772,13 @@ function App() {
           isOpen={sidebarOpen}
           onToggle={() => setSidebarOpen((p) => !p)}
           sessions={sessionList}
-          onSelectSession={handleSwitchSession}
+          onSelectSession={(id) => {
+            handleSwitchSession(id);
+            setActiveView("chat");
+          }}
+          activeView={activeView}
+          onViewChange={setActiveView}
+          unreadCount={unreadCount}
           onNewChat={async () => {
             try {
               await fetch(`${API_BASE}/api/sessions`, {
@@ -640,6 +792,7 @@ function App() {
             } catch { /* ignore */ }
           }}
         />
+
 
         {/* Main content */}
         <div className="flex flex-col flex-1 min-w-0">
@@ -696,8 +849,19 @@ function App() {
             </div>
           </header>
 
-          {/* Conditional layout: centered welcome vs conversation */}
-          {messages.length === 0 && !isStreaming && !loadingSession ? (
+          {/* View: Workspace or Chat */}
+          {activeView === "workspace" ? (
+            <WorkspacePage
+              notifications={notifications}
+              unreadCount={unreadCount}
+              onNotificationClick={handleNotificationClick}
+              onOpenSession={(notif) => {
+                handleNotificationClick(notif);
+                setActiveView("chat");
+              }}
+              onMarkAllRead={handleMarkAllRead}
+            />
+          ) : messages.length === 0 && !isStreaming && !loadingSession ? (
             /* ── Welcome screen: centered ── */
             <div className="flex-1 flex flex-col items-center justify-center px-4">
               <div className="w-[85%] max-w-3xl flex flex-col items-center gap-8">

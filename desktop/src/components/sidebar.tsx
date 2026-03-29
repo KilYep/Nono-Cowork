@@ -1,6 +1,18 @@
-import { Plus, PanelLeftClose, Settings, MessageSquare } from "lucide-react";
+import { useState } from "react";
+import {
+  Plus,
+  PanelLeftClose,
+  Settings,
+  MessageSquare,
+  Clock,
+  Trash2,
+  ChevronRight,
+  Zap,
+} from "lucide-react";
 
 // ── Types ──
+
+export type SidebarView = "chat" | "workspace";
 
 export interface SessionItem {
   id: string;
@@ -17,6 +29,12 @@ interface SidebarProps {
   onNewChat: () => void;
   sessions: SessionItem[];
   onSelectSession: (id: string) => void;
+  onDeleteSession?: (id: string) => void;
+  // View switching
+  activeView: SidebarView;
+  onViewChange: (view: SidebarView) => void;
+  // Notifications badge
+  unreadCount: number;
 }
 
 // ── Date grouping ──
@@ -56,7 +74,13 @@ export function Sidebar({
   onNewChat,
   sessions,
   onSelectSession,
+  onDeleteSession,
+  activeView,
+  onViewChange,
+  unreadCount,
 }: SidebarProps) {
+  const [historyExpanded, setHistoryExpanded] = useState(false);
+  const [hoveredId, setHoveredId] = useState<string | null>(null);
   const grouped = groupByDate(sessions);
 
   return (
@@ -87,7 +111,10 @@ export function Sidebar({
         {/* New Chat button */}
         <div className="px-3 py-1">
           <button
-            onClick={onNewChat}
+            onClick={() => {
+              onNewChat();
+              onViewChange("chat");
+            }}
             className="flex items-center gap-2 w-full px-3 py-2 rounded-lg text-[13px] text-sidebar-foreground/70 hover:bg-sidebar-accent hover:text-sidebar-foreground transition-colors"
             style={{ WebkitAppRegion: "no-drag" } as React.CSSProperties}
           >
@@ -96,40 +123,111 @@ export function Sidebar({
           </button>
         </div>
 
-        {/* Session list */}
-        <div className="flex-1 overflow-y-auto px-2 py-1">
-          {sessions.length === 0 ? (
-            <div className="flex flex-col items-center justify-center h-full text-sidebar-foreground/25 gap-2">
-              <MessageSquare size={28} strokeWidth={1.2} />
-              <p className="text-xs">No conversations yet</p>
-            </div>
-          ) : (
-            grouped.map(([group, items]) => (
-              <div key={group} className="mb-2">
-                <div className="px-2 py-1.5 text-[11px] font-medium text-sidebar-foreground/35 uppercase tracking-wider">
-                  {group}
-                </div>
-                {items.map((s) => (
-                  <button
-                    key={s.id}
-                    onClick={() => !s.is_current && onSelectSession(s.id)}
-                    className={`w-full text-left px-3 py-1.5 rounded-lg text-[13px] truncate transition-colors mb-0.5 ${
-                      s.is_current
-                        ? "bg-sidebar-accent text-sidebar-foreground/90"
-                        : "text-sidebar-foreground/55 hover:bg-sidebar-accent/50 hover:text-sidebar-foreground/80"
-                    }`}
-                  >
-                    {s.preview || "New conversation"}
-                  </button>
-                ))}
+        {/* Navigation items */}
+        <div
+          className="flex flex-col flex-1 overflow-y-auto"
+          style={{ WebkitAppRegion: "no-drag" } as React.CSSProperties}
+        >
+          {/* ── Workspace — page navigation ── */}
+          <div className="px-3">
+            <button
+              onClick={() => onViewChange("workspace")}
+              className={`flex items-center gap-2.5 w-full px-3 py-2 rounded-lg text-[13px] transition-colors ${
+                activeView === "workspace"
+                  ? "bg-sidebar-accent text-sidebar-foreground/90"
+                  : "text-sidebar-foreground/55 hover:bg-sidebar-accent hover:text-sidebar-foreground/80"
+              }`}
+            >
+              <Zap size={16} strokeWidth={1.5} />
+              <span>Workspace</span>
+              {unreadCount > 0 && (
+                <span className="ml-auto flex items-center justify-center min-w-[18px] h-[18px] px-1 rounded-full bg-blue-500/15 text-[11px] font-medium text-blue-500 tabular-nums">
+                  {unreadCount}
+                </span>
+              )}
+            </button>
+          </div>
+
+          {/* ── History — collapsible ── */}
+          <div className="flex flex-col min-h-0">
+            <button
+              onClick={() => setHistoryExpanded((p) => !p)}
+              className="flex items-center gap-2.5 mx-3 px-3 py-2 rounded-lg text-[13px] text-sidebar-foreground/55 hover:bg-sidebar-accent hover:text-sidebar-foreground/80 transition-colors"
+            >
+              <Clock size={16} strokeWidth={1.5} />
+              <span>History</span>
+              {sessions.length > 0 && (
+                <span className="ml-auto text-[11px] text-sidebar-foreground/30 tabular-nums">
+                  {sessions.length}
+                </span>
+              )}
+              <ChevronRight
+                size={14}
+                className={`text-sidebar-foreground/30 transition-transform duration-200 ${
+                  historyExpanded ? "rotate-90" : ""
+                }`}
+              />
+            </button>
+
+            {/* Expandable session list */}
+            {historyExpanded && (
+              <div className="px-2 py-0.5">
+                {sessions.length === 0 ? (
+                  <div className="flex flex-col items-center justify-center text-sidebar-foreground/25 gap-2 py-8">
+                    <MessageSquare size={24} strokeWidth={1.2} />
+                    <p className="text-xs">No conversations yet</p>
+                  </div>
+                ) : (
+                  grouped.map(([group, items]) => (
+                    <div key={group} className="mb-1.5">
+                      <div className="px-2 py-1.5 text-[11px] font-medium text-sidebar-foreground/35 uppercase tracking-wider">
+                        {group}
+                      </div>
+                      {items.map((s) => (
+                        <div
+                          key={s.id}
+                          className="relative"
+                          onMouseEnter={() => setHoveredId(s.id)}
+                          onMouseLeave={() => setHoveredId(null)}
+                        >
+                          <button
+                            onClick={() => {
+                              if (!s.is_current) onSelectSession(s.id);
+                              onViewChange("chat");
+                            }}
+                            className={`w-full text-left px-3 py-1.5 rounded-lg text-[13px] truncate transition-colors mb-0.5 pr-8 ${
+                              s.is_current && activeView === "chat"
+                                ? "bg-sidebar-accent text-sidebar-foreground/90"
+                                : "text-sidebar-foreground/55 hover:bg-sidebar-accent/50 hover:text-sidebar-foreground/80"
+                            }`}
+                          >
+                            {s.preview || "New conversation"}
+                          </button>
+                          {onDeleteSession && hoveredId === s.id && !s.is_current && (
+                            <button
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                onDeleteSession(s.id);
+                              }}
+                              className="absolute right-1.5 top-1/2 -translate-y-1/2 p-1 rounded-md text-sidebar-foreground/30 hover:text-red-500 hover:bg-red-500/10 transition-colors"
+                              aria-label="Delete session"
+                            >
+                              <Trash2 size={13} />
+                            </button>
+                          )}
+                        </div>
+                      ))}
+                    </div>
+                  ))
+                )}
               </div>
-            ))
-          )}
+            )}
+          </div>
         </div>
 
-        {/* Footer */}
-        <div className="px-3 py-3 border-t border-sidebar-border">
-          <button className="flex items-center gap-2 w-full px-3 py-2 rounded-lg text-[13px] text-sidebar-foreground/40 hover:bg-sidebar-accent hover:text-sidebar-foreground/70 transition-colors">
+        {/* Settings */}
+        <div className="mt-auto px-3 py-3 border-t border-sidebar-border shrink-0">
+          <button className="flex items-center gap-2.5 w-full px-3 py-2 rounded-lg text-[13px] text-sidebar-foreground/40 hover:bg-sidebar-accent hover:text-sidebar-foreground/70 transition-colors">
             <Settings size={15} strokeWidth={1.5} />
             <span>Settings</span>
           </button>
