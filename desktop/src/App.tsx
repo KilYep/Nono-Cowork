@@ -567,47 +567,57 @@ function App() {
       return () => es.close();
     }
 
-    // Fetch-based SSE with auth header
+    // Fetch-based SSE with auth header + auto-reconnect
     const controller = new AbortController();
     (async () => {
-      try {
-        const res = await fetch(url, {
-          headers: authHeaders(),
-          signal: controller.signal,
-        });
-        const reader = res.body?.getReader();
-        if (!reader) return;
-        const decoder = new TextDecoder();
-        let buffer = "";
-        let eventType = "";
+      while (!controller.signal.aborted) {
+        try {
+          const res = await fetch(url, {
+            headers: authHeaders(),
+            signal: controller.signal,
+          });
+          const reader = res.body?.getReader();
+          if (!reader) break;
+          const decoder = new TextDecoder();
+          let buffer = "";
+          let eventType = "";
 
-        while (true) {
-          const { done, value } = await reader.read();
-          if (done) break;
-          buffer += decoder.decode(value, { stream: true });
-          const lines = buffer.split("\n");
-          buffer = lines.pop() || "";
+          // On successful connect, refresh notifications to catch any
+          // events that arrived while disconnected
+          fetchNotifications();
 
-          for (const line of lines) {
-            if (line.startsWith("event:")) {
-              eventType = line.slice(6).trim();
-            } else if (line.startsWith("data:")) {
-              const dataStr = line.slice(5).trim();
-              if (!dataStr) continue;
-              try {
-                if (eventType === "new_notification") {
-                  const notif = JSON.parse(dataStr) as Notification;
-                  setNotifications((prev) => [notif, ...prev]);
-                  setUnreadCount((prev) => prev + 1);
-                } else if (eventType === "notification_update") {
-                  fetchNotifications();
-                }
-              } catch { /* ignore */ }
+          while (true) {
+            const { done, value } = await reader.read();
+            if (done) break;
+            buffer += decoder.decode(value, { stream: true });
+            const lines = buffer.split("\n");
+            buffer = lines.pop() || "";
+
+            for (const line of lines) {
+              if (line.startsWith("event:")) {
+                eventType = line.slice(6).trim();
+              } else if (line.startsWith("data:")) {
+                const dataStr = line.slice(5).trim();
+                if (!dataStr) continue;
+                try {
+                  if (eventType === "new_notification") {
+                    const notif = JSON.parse(dataStr) as Notification;
+                    setNotifications((prev) => [notif, ...prev]);
+                    setUnreadCount((prev) => prev + 1);
+                  } else if (eventType === "notification_update") {
+                    fetchNotifications();
+                  }
+                } catch { /* ignore */ }
+              }
             }
           }
+        } catch {
+          if (controller.signal.aborted) break;
         }
-      } catch {
-        // Connection closed or aborted
+        // Reconnect after 3s (mirrors native EventSource retry behavior)
+        if (!controller.signal.aborted) {
+          await new Promise((r) => setTimeout(r, 3000));
+        }
       }
     })();
     return () => controller.abort();

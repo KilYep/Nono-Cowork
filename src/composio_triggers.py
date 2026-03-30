@@ -305,11 +305,13 @@ def _handle_trigger_event(data):
             recipe = _find_recipe_by_trigger_id(trigger_id) or _find_recipe_by_slug(trigger_slug)
             agent_prompt = (recipe or {}).get("agent_prompt") or _get_trigger_prompt()
             recipe_user_id = (recipe or {}).get("user_id") or user_id
+            model = (recipe or {}).get("model", "")
 
             # Process the event via subagent with full history capture
             result = _run_autonomous_agent(
                 agent_prompt, event_data, trigger_slug, trigger_id, recipe_user_id,
                 deliver_to_channels=(recipe or {}).get("channel_name"),
+                model=model,
             )
 
             if result is None:
@@ -326,11 +328,13 @@ def _run_autonomous_agent(
     trigger_id: str,
     user_id: str,
     deliver_to_channels: str = None,
+    model: str = "",
 ) -> str | None:
     """Run a one-shot agent to process a trigger event.
 
-    Uses run_with_history() to capture the full execution trace,
-    then stores everything via NotificationStore.
+    Uses the self provider (same agent_loop as the main agent) to ensure
+    full tool access and consistent behavior. The model can be specified
+    per-trigger via the recipe.
 
     Returns the agent's response, or None if the agent decided to skip.
     """
@@ -349,16 +353,13 @@ def _run_autonomous_agent(
 
     start_time = time.time()
     try:
-        # Use gemini-cli for richer trigger processing (has full tool access).
-        # Note: gemini-cli (Node.js) uses more memory than 'self' provider.
-        # If OOM occurs on low-memory servers, switch back to name="self".
-        provider = get_provider(name="gemini-cli")
+        provider = get_provider(name="self")
         logger.info(
-            "Processing trigger %s via subagent provider: %s",
-            trigger_slug, provider.name,
+            "Processing trigger %s via provider=%s, model=%s",
+            trigger_slug, provider.name, model or "(default)",
         )
         final_text, history, stats = provider.run_with_history(
-            task=task, system_prompt=agent_prompt,
+            task=task, system_prompt=agent_prompt, model=model,
         )
     except Exception as e:
         logger.error("Subagent error for trigger %s: %s", trigger_slug, e)
@@ -437,8 +438,8 @@ def list_available_triggers(toolkit: str) -> str:
 
 
 def create_trigger(trigger_slug: str, agent_prompt: str = None,
-                   trigger_config: dict = None) -> str:
-    """Create a new trigger instance with an optional agent_prompt.
+                   trigger_config: dict = None, model: str = "") -> str:
+    """Create a new trigger instance with an optional agent_prompt and model.
 
     The agent_prompt is the system prompt for the disposable agent that
     processes each event. It should be written by the main agent based on
@@ -448,6 +449,7 @@ def create_trigger(trigger_slug: str, agent_prompt: str = None,
         trigger_slug: The trigger type slug (e.g. 'GMAIL_NEW_GMAIL_MESSAGE').
         agent_prompt: System prompt for the event-processing agent.
         trigger_config: Optional configuration dict for the trigger.
+        model: LLM model for processing events. Empty = use system default.
     """
     if not is_enabled():
         return json.dumps({"error": "Composio not enabled"})
@@ -464,7 +466,7 @@ def create_trigger(trigger_slug: str, agent_prompt: str = None,
 
         trigger_id = getattr(trigger, 'trigger_id', str(trigger))
 
-        # Persist the recipe (trigger_slug + agent_prompt)
+        # Persist the recipe (trigger_slug + agent_prompt + model)
         # so _handle_trigger_event can look it up later
         from context import get_context
         ctx = get_context()
@@ -475,6 +477,7 @@ def create_trigger(trigger_slug: str, agent_prompt: str = None,
             "trigger_id": trigger_id,
             "trigger_slug": trigger_slug,
             "agent_prompt": agent_prompt or _get_trigger_prompt(),
+            "model": model,
             "trigger_config": trigger_config,
             "user_id": current_user_id,
             "channel_name": ctx.get("channel_name", ""),
@@ -487,6 +490,7 @@ def create_trigger(trigger_slug: str, agent_prompt: str = None,
             "trigger_id": trigger_id,
             "trigger_slug": trigger_slug,
             "has_agent_prompt": bool(agent_prompt),
+            "model": model or "(system default)",
             "message": (
                 f"Trigger '{trigger_slug}' created successfully. "
                 f"Events will be processed by the configured agent and delivered automatically."

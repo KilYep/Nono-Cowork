@@ -67,6 +67,15 @@ def composio_list_triggers(toolkit: str) -> str:
                     "This prompt will be used every time an event is received."
                 ),
             },
+            "model": {
+                "type": "string",
+                "description": (
+                    "LLM model for processing trigger events. Choose based on task complexity: "
+                    "- Simple filtering/notification: use a fast cheap model (e.g., 'gemini/gemini-3-flash-preview'). "
+                    "- Complex analysis/multi-step actions: use a stronger model (e.g., 'gemini/gemini-3.1-pro-preview'). "
+                    "Leave empty to use the system default model."
+                ),
+            },
             "trigger_config": {
                 "type": "object",
                 "description": "Optional configuration for the trigger. Use composio_list_triggers to see required config fields.",
@@ -75,11 +84,12 @@ def composio_list_triggers(toolkit: str) -> str:
         "required": ["trigger_slug", "agent_prompt"],
     },
 )
-def composio_create_trigger(trigger_slug: str, agent_prompt: str, trigger_config: dict = None) -> str:
+def composio_create_trigger(trigger_slug: str, agent_prompt: str,
+                            trigger_config: dict = None, model: str = "") -> str:
     if not _is_enabled():
         return '{"error": "Composio is not enabled. Set COMPOSIO_API_KEY in .env."}'
     from composio_triggers import create_trigger
-    return create_trigger(trigger_slug, agent_prompt, trigger_config)
+    return create_trigger(trigger_slug, agent_prompt, trigger_config, model=model)
 
 
 @tool(
