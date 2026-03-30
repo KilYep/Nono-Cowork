@@ -50,8 +50,9 @@ REPORT_RESULT_TOOL = {
                             "type": {
                                 "type": "string",
                                 "description": (
-                                    "Deliverable type. Common: file, email_draft, report, link, data. "
-                                    "Custom types are also accepted; the frontend will render a generic card"
+                                    "Deliverable type that determines how the frontend renders it. "
+                                    "Known types: file, email_draft, report, link, data. "
+                                    "Unknown types are rendered as a generic card."
                                 ),
                             },
                             "label": {
@@ -66,30 +67,9 @@ REPORT_RESULT_TOOL = {
                                 "type": "object",
                                 "description": (
                                     "Type-specific data, arbitrary key-value pairs. "
-                                    "e.g. email_draft: {to, subject, body_preview}; "
-                                    "file: {path, size}; link: {url}"
+                                    "email_draft: {to, subject, body, draft_id}; "
+                                    "file: {path, size}; link: {url}; report: {path}"
                                 ),
-                            },
-                            "actions": {
-                                "type": "array",
-                                "description": "Actions the user can take on this deliverable",
-                                "items": {
-                                    "type": "object",
-                                    "properties": {
-                                        "label": {
-                                            "type": "string",
-                                            "description": "Button text, e.g. 'Send' or 'Open File'",
-                                        },
-                                        "action_type": {
-                                            "type": "string",
-                                            "description": "Action type: open_draft, open_file, send_email, link, dismiss",
-                                        },
-                                        "primary": {
-                                            "type": "boolean",
-                                            "description": "Whether this is the primary action (highlighted button)",
-                                        },
-                                    },
-                                },
                             },
                         },
                         "required": ["type", "label"],
@@ -121,18 +101,21 @@ Do NOT write a free-form summary — use ONLY this JSON format:
       "type": "file|email_draft|report|link|data",
       "label": "display name",
       "description": "short note",
-      "metadata": {},
-      "actions": [
-        {"label": "button text", "action_type": "open_file|open_draft|send_email|link", "primary": true}
-      ]
+      "metadata": {}
     }
   ]
 }
 ```
 
+Metadata by type:
+- email_draft: {"to": "...", "subject": "...", "body": "full draft body", "draft_id": "..."}
+- file: {"path": "...", "size": "..."}
+- report: {"path": "..."}
+- link: {"url": "..."}
+
 Rules:
 - summary is REQUIRED — always include it
-- deliverables: list each concrete output (saved file, created draft, etc.) with its actions
+- deliverables: list each concrete output (saved file, created draft, etc.)
 - If no concrete deliverables, just include summary with an empty deliverables array
 - If the event is not worth notifying (spam, system messages, etc.), reply ONLY with [SKIP]
 """.strip()
@@ -245,19 +228,10 @@ def _normalize_card(data: dict) -> dict:
                 "type": str(d.get("type", "data")),
                 "label": str(d.get("label", "")),
                 "description": str(d.get("description", "")),
-                "metadata": d.get("metadata", {}),
-                "actions": [],
+                "metadata": d.get("metadata") if isinstance(d.get("metadata"), dict) else {},
             }
-            # Normalize actions
-            raw_actions = d.get("actions", [])
-            if isinstance(raw_actions, list):
-                for a in raw_actions:
-                    if isinstance(a, dict) and "label" in a:
-                        deliverable["actions"].append({
-                            "label": str(a["label"]),
-                            "action_type": str(a.get("action_type", "link")),
-                            "primary": bool(a.get("primary", False)),
-                        })
+            # Agent may still output actions — silently drop them
+            # (frontend hardcodes actions per component type)
             if deliverable["label"]:  # Only add if has a label
                 card["deliverables"].append(deliverable)
 

@@ -533,9 +533,6 @@ async def inject_mock_notifications():
                         "label": "报价表模板.xlsx",
                         "description": "附件已下载到 SyncFromLocal/Inbox/",
                         "metadata": {"path": "SyncFromLocal/Inbox/报价表模板.xlsx", "size": "24.5 KB"},
-                        "actions": [
-                            {"label": "打开文件", "action_type": "open_file", "primary": False},
-                        ],
                     },
                     {
                         "type": "email_draft",
@@ -557,9 +554,6 @@ async def inject_mock_notifications():
                             "body_preview": "张伟先生：您好！感谢您对我们公司的信任与关注...",
                             "draft_id": "draft_789",
                         },
-                        "actions": [
-                            {"label": "发送", "action_type": "send_email", "primary": True},
-                        ],
                     },
                 ],
             }),
@@ -595,9 +589,6 @@ async def inject_mock_notifications():
                         "label": "每日工作汇总 2026-03-30",
                         "description": "已生成到 Reports/2026-03-30.md",
                         "metadata": {"path": "Reports/2026-03-30.md"},
-                        "actions": [
-                            {"label": "查看报告", "action_type": "open_file", "primary": True},
-                        ],
                     },
                 ],
             }),
