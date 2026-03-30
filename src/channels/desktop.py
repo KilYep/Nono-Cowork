@@ -755,6 +755,456 @@ async def get_notification_session(notification_id: str):
     }
 
 
+# ══════════════════════════════════════════════
+# RESTful: Automations (Cron Tasks + Triggers)
+# ══════════════════════════════════════════════
+
+
+# ── Scheduled Tasks (Cron) ──
+
+@app.get("/api/tasks")
+async def list_tasks_api():
+    """List all scheduled (cron) tasks."""
+    from scheduler.store import list_tasks
+    from scheduler import scheduler as task_scheduler
+
+    tasks = list_tasks()
+    result = []
+    for t in tasks:
+        next_run = task_scheduler.get_next_run(t["id"])
+        result.append({
+            **t,
+            "next_run_at": next_run,
+        })
+    return {"tasks": result, "total": len(result)}
+
+
+@app.post("/api/tasks")
+async def create_task_api(request: Request):
+    """Create a new scheduled task.
+
+    Body: {task_name, cron, task_prompt, channel_name?}
+    """
+    from scheduler.store import create_task
+    from scheduler import scheduler as task_scheduler
+
+    body = await request.json()
+    task_name = body.get("task_name", "").strip()
+    cron = body.get("cron", "").strip()
+    task_prompt = body.get("task_prompt", "").strip()
+    channel_name = body.get("channel_name", "desktop")
+
+    if not task_name:
+        return JSONResponse({"error": "Missing 'task_name'"}, status_code=400)
+    if not cron:
+        return JSONResponse({"error": "Missing 'cron'"}, status_code=400)
+    if not task_prompt:
+        return JSONResponse({"error": "Missing 'task_prompt'"}, status_code=400)
+
+    try:
+        task = create_task(
+            task_name=task_name,
+            cron=cron,
+            task_prompt=task_prompt,
+            user_id=DESKTOP_USER_ID,
+            channel_name=channel_name,
+        )
+        task_scheduler.add_task(task)
+        next_run = task_scheduler.get_next_run(task["id"])
+        return {**task, "next_run_at": next_run}
+    except ValueError as e:
+        return JSONResponse({"error": str(e)}, status_code=400)
+
+
+@app.get("/api/tasks/{task_id}")
+async def get_task_api(task_id: str):
+    """Get a single scheduled task by ID."""
+    from scheduler.store import get_task
+    from scheduler import scheduler as task_scheduler
+
+    task = get_task(task_id)
+    if not task:
+        return JSONResponse({"error": "Task not found"}, status_code=404)
+    next_run = task_scheduler.get_next_run(task_id)
+    return {**task, "next_run_at": next_run}
+
+
+@app.put("/api/tasks/{task_id}")
+async def update_task_api(task_id: str, request: Request):
+    """Update a scheduled task's fields.
+
+    Body: {task_name?, cron?, task_prompt?, enabled?}
+    """
+    from scheduler.store import get_task, update_task
+    from scheduler import scheduler as task_scheduler
+
+    task = get_task(task_id)
+    if not task:
+        return JSONResponse({"error": "Task not found"}, status_code=404)
+
+    body = await request.json()
+    updates = {}
+    for field in ("task_name", "cron", "task_prompt", "enabled"):
+        if field in body:
+            updates[field] = body[field]
+
+    if not updates:
+        return JSONResponse({"error": "No fields to update"}, status_code=400)
+
+    try:
+        updated = update_task(task_id, **updates)
+        if not updated:
+            return JSONResponse({"error": "Update failed"}, status_code=500)
+
+        # Sync with APScheduler
+        if "cron" in updates or "enabled" in updates:
+            task_scheduler.update_task_schedule(
+                task_id,
+                cron=updates.get("cron"),
+                enabled=updates.get("enabled"),
+            )
+
+        next_run = task_scheduler.get_next_run(task_id)
+        return {**updated, "next_run_at": next_run}
+    except ValueError as e:
+        return JSONResponse({"error": str(e)}, status_code=400)
+
+
+@app.patch("/api/tasks/{task_id}/toggle")
+async def toggle_task_api(task_id: str):
+    """Toggle a task's enabled/disabled state."""
+    from scheduler.store import get_task, update_task
+    from scheduler import scheduler as task_scheduler
+
+    task = get_task(task_id)
+    if not task:
+        return JSONResponse({"error": "Task not found"}, status_code=404)
+
+    new_enabled = not task.get("enabled", True)
+    updated = update_task(task_id, enabled=new_enabled)
+    task_scheduler.update_task_schedule(task_id, enabled=new_enabled)
+    next_run = task_scheduler.get_next_run(task_id)
+    return {**updated, "next_run_at": next_run}
+
+
+@app.delete("/api/tasks/{task_id}")
+async def delete_task_api(task_id: str):
+    """Delete a scheduled task permanently."""
+    from scheduler.store import get_task, delete_task
+    from scheduler import scheduler as task_scheduler
+
+    task = get_task(task_id)
+    if not task:
+        return JSONResponse({"error": "Task not found"}, status_code=404)
+
+    task_scheduler.remove_task(task_id)
+    delete_task(task_id)
+    return {"message": f"Task '{task_id}' deleted", "id": task_id}
+
+
+@app.post("/api/tasks/{task_id}/run")
+async def run_task_now_api(task_id: str):
+    """Manually trigger a task to run now (one-off execution)."""
+    from scheduler.store import get_task
+    from scheduler.executor import execute_task
+
+    task = get_task(task_id)
+    if not task:
+        return JSONResponse({"error": "Task not found"}, status_code=404)
+
+    execute_task(task)
+    return {"message": f"Task '{task_id}' triggered", "id": task_id}
+
+
+# ── Composio Triggers ──
+
+@app.get("/api/triggers")
+async def list_triggers_api():
+    """List all trigger recipes (local) merged with Composio active status."""
+    from composio_triggers import _load_recipes, is_enabled
+
+    if not is_enabled():
+        return {"triggers": [], "total": 0, "composio_enabled": False}
+
+    recipes = _load_recipes()
+
+    # Try to get live status from Composio
+    active_map = {}
+    try:
+        from composio import Composio
+        client = Composio()
+        active_triggers = client.triggers.list_active()
+        for t in active_triggers:
+            tid = getattr(t, "trigger_id", str(t))
+            active_map[tid] = {
+                "status": getattr(t, "status", "ACTIVE"),
+                "created_at_remote": getattr(t, "created_at", ""),
+            }
+    except Exception as e:
+        logger.warning("Could not fetch active triggers from Composio: %s", e)
+
+    result = []
+    for trigger_id, recipe in recipes.items():
+        info = active_map.get(trigger_id, {})
+        result.append({
+            "id": trigger_id,
+            "trigger_id": trigger_id,
+            "trigger_slug": recipe.get("trigger_slug", ""),
+            "agent_prompt": recipe.get("agent_prompt", ""),
+            "model": recipe.get("model", ""),
+            "trigger_config": recipe.get("trigger_config"),
+            "user_id": recipe.get("user_id", ""),
+            "channel_name": recipe.get("channel_name", ""),
+            "created_at": recipe.get("created_at", ""),
+            "enabled": trigger_id in active_map,
+            "status": info.get("status", "UNKNOWN"),
+        })
+
+    return {"triggers": result, "total": len(result), "composio_enabled": True}
+
+
+@app.get("/api/triggers/{trigger_id}")
+async def get_trigger_api(trigger_id: str):
+    """Get a single trigger recipe's details."""
+    from composio_triggers import _load_recipes
+
+    recipes = _load_recipes()
+    recipe = recipes.get(trigger_id)
+    if not recipe:
+        return JSONResponse({"error": "Trigger not found"}, status_code=404)
+
+    return {
+        "id": trigger_id,
+        "trigger_id": trigger_id,
+        "trigger_slug": recipe.get("trigger_slug", ""),
+        "agent_prompt": recipe.get("agent_prompt", ""),
+        "model": recipe.get("model", ""),
+        "trigger_config": recipe.get("trigger_config"),
+        "user_id": recipe.get("user_id", ""),
+        "channel_name": recipe.get("channel_name", ""),
+        "created_at": recipe.get("created_at", ""),
+    }
+
+
+@app.put("/api/triggers/{trigger_id}")
+async def update_trigger_api(trigger_id: str, request: Request):
+    """Update a trigger recipe's editable fields.
+
+    Body: {agent_prompt?, model?, channel_name?}
+    Note: trigger_slug and trigger_config cannot be changed after creation.
+    """
+    from composio_triggers import _load_recipes, _save_recipes
+
+    recipes = _load_recipes()
+    recipe = recipes.get(trigger_id)
+    if not recipe:
+        return JSONResponse({"error": "Trigger not found"}, status_code=404)
+
+    body = await request.json()
+    changed = False
+    for field in ("agent_prompt", "model", "channel_name"):
+        if field in body:
+            recipe[field] = body[field]
+            changed = True
+
+    if not changed:
+        return JSONResponse({"error": "No fields to update"}, status_code=400)
+
+    recipes[trigger_id] = recipe
+    _save_recipes(recipes)
+
+    return {
+        "id": trigger_id,
+        **recipe,
+        "message": "Trigger recipe updated",
+    }
+
+
+@app.patch("/api/triggers/{trigger_id}/toggle")
+async def toggle_trigger_api(trigger_id: str):
+    """Enable or disable a trigger on Composio.
+
+    Disabling removes the trigger from Composio (stops events).
+    Enabling re-creates it with the stored recipe config.
+    """
+    from composio_triggers import _load_recipes, _save_recipes, is_enabled as composio_enabled
+
+    if not composio_enabled():
+        return JSONResponse({"error": "Composio not enabled"}, status_code=400)
+
+    recipes = _load_recipes()
+    recipe = recipes.get(trigger_id)
+    if not recipe:
+        return JSONResponse({"error": "Trigger recipe not found"}, status_code=404)
+
+    # Check current active status
+    is_active = False
+    try:
+        from composio import Composio
+        client = Composio()
+        active_triggers = client.triggers.list_active()
+        active_ids = {getattr(t, "trigger_id", str(t)) for t in active_triggers}
+        is_active = trigger_id in active_ids
+    except Exception as e:
+        logger.warning("Could not check trigger status: %s", e)
+
+    if is_active:
+        # Disable: remove from Composio
+        try:
+            from composio import Composio
+            client = Composio()
+            client.triggers.disable(trigger_id=trigger_id)
+            return {
+                "id": trigger_id,
+                "enabled": False,
+                "message": f"Trigger {trigger_id} disabled",
+            }
+        except Exception as e:
+            return JSONResponse({"error": f"Failed to disable: {str(e)}"}, status_code=500)
+    else:
+        # Enable: re-create on Composio with stored config
+        try:
+            from composio import Composio
+            from config import COMPOSIO_USER_ID
+            client = Composio()
+            trigger = client.triggers.create(
+                slug=recipe["trigger_slug"],
+                user_id=COMPOSIO_USER_ID,
+                trigger_config=recipe.get("trigger_config") or {},
+            )
+            new_id = getattr(trigger, "trigger_id", str(trigger))
+
+            # If Composio assigned a new ID, migrate the recipe
+            if new_id != trigger_id:
+                recipes[new_id] = recipe
+                recipes[new_id]["trigger_id"] = new_id
+                del recipes[trigger_id]
+                _save_recipes(recipes)
+
+            return {
+                "id": new_id,
+                "enabled": True,
+                "message": f"Trigger re-enabled as {new_id}",
+            }
+        except Exception as e:
+            return JSONResponse({"error": f"Failed to enable: {str(e)}"}, status_code=500)
+
+
+@app.delete("/api/triggers/{trigger_id}")
+async def delete_trigger_api(trigger_id: str):
+    """Delete a trigger: disable on Composio + remove local recipe."""
+    from composio_triggers import _load_recipes, _save_recipes, is_enabled as composio_enabled
+
+    recipes = _load_recipes()
+    if trigger_id not in recipes:
+        return JSONResponse({"error": "Trigger not found"}, status_code=404)
+
+    # Try to disable on Composio (best-effort)
+    if composio_enabled():
+        try:
+            from composio import Composio
+            client = Composio()
+            client.triggers.disable(trigger_id=trigger_id)
+        except Exception as e:
+            logger.warning("Could not disable trigger on Composio: %s", e)
+
+    # Remove local recipe
+    del recipes[trigger_id]
+    _save_recipes(recipes)
+
+    return {"message": f"Trigger '{trigger_id}' deleted", "id": trigger_id}
+
+
+# ── Unified Automations (combined view) ──
+
+@app.get("/api/automations")
+async def list_automations_api():
+    """Unified view: returns ALL cron tasks + trigger recipes in a consistent shape.
+
+    Each item has:
+      - id: unique identifier
+      - type: "cron" | "trigger"
+      - name: human-readable name
+      - description: what this automation does (prompt preview)
+      - schedule: cron expression (cron only) or trigger_slug (trigger only)
+      - enabled: bool
+      - model: LLM model override (empty = default)
+      - channel_name: delivery channel
+      - created_at: ISO timestamp
+      - last_run_at: ISO timestamp or null (cron only)
+      - next_run_at: ISO timestamp or null (cron only)
+      - config: type-specific full config
+    """
+    from scheduler.store import list_tasks
+    from scheduler import scheduler as task_scheduler
+    from composio_triggers import _load_recipes, is_enabled as composio_enabled
+
+    items = []
+
+    # ── Cron tasks ──
+    for t in list_tasks():
+        next_run = task_scheduler.get_next_run(t["id"])
+        items.append({
+            "id": t["id"],
+            "type": "cron",
+            "name": t["task_name"],
+            "description": t["task_prompt"][:200],
+            "schedule": t["cron"],
+            "enabled": t.get("enabled", True),
+            "model": "",
+            "channel_name": t.get("channel_name", ""),
+            "user_id": t.get("user_id", ""),
+            "created_at": t.get("created_at", ""),
+            "last_run_at": t.get("last_run_at"),
+            "last_result": (t.get("last_result") or "")[:200],
+            "next_run_at": next_run,
+            "config": t,  # full task data
+        })
+
+    # ── Triggers ──
+    if composio_enabled():
+        recipes = _load_recipes()
+        # Quick active check
+        active_ids = set()
+        try:
+            from composio import Composio
+            client = Composio()
+            for t in client.triggers.list_active():
+                active_ids.add(getattr(t, "trigger_id", str(t)))
+        except Exception:
+            pass
+
+        for trigger_id, recipe in recipes.items():
+            items.append({
+                "id": trigger_id,
+                "type": "trigger",
+                "name": recipe.get("trigger_slug", ""),
+                "description": (recipe.get("agent_prompt") or "")[:200],
+                "schedule": recipe.get("trigger_slug", ""),
+                "enabled": trigger_id in active_ids,
+                "model": recipe.get("model", ""),
+                "channel_name": recipe.get("channel_name", ""),
+                "user_id": recipe.get("user_id", ""),
+                "created_at": recipe.get("created_at", ""),
+                "last_run_at": None,
+                "last_result": "",
+                "next_run_at": None,
+                "config": recipe,  # full recipe
+            })
+
+    # Sort by created_at descending
+    items.sort(key=lambda x: x.get("created_at") or "", reverse=True)
+
+    return {
+        "automations": items,
+        "total": len(items),
+        "counts": {
+            "cron": sum(1 for x in items if x["type"] == "cron"),
+            "trigger": sum(1 for x in items if x["type"] == "trigger"),
+        },
+    }
+
+
 # ── Entry point ──
 
 def main():
@@ -799,6 +1249,17 @@ def main():
     print(f"     PUT  /api/models/current            — switch model")
     print(f"     GET  /api/notifications             — notification list")
     print(f"     GET  /api/notifications/stream      — SSE notification push")
+    print(f"     GET  /api/automations               — all tasks + triggers")
+    print(f"     GET  /api/tasks                     — list cron tasks")
+    print(f"     POST /api/tasks                     — create cron task")
+    print(f"     PUT  /api/tasks/:id                 — update cron task")
+    print(f"     PATCH /api/tasks/:id/toggle          — toggle cron task")
+    print(f"     DELETE /api/tasks/:id                — delete cron task")
+    print(f"     POST /api/tasks/:id/run              — run task now")
+    print(f"     GET  /api/triggers                  — list triggers")
+    print(f"     PUT  /api/triggers/:id              — update trigger recipe")
+    print(f"     PATCH /api/triggers/:id/toggle       — toggle trigger")
+    print(f"     DELETE /api/triggers/:id             — delete trigger")
     print(f"     GET  /api/health                   — health check")
     print(f"     POST /api/command/                 — slash command (IM compat)")
     print("=" * 50)

@@ -303,9 +303,15 @@ def _handle_trigger_event(data):
 
             # Look up the trigger recipe (agent_prompt)
             recipe = _find_recipe_by_trigger_id(trigger_id) or _find_recipe_by_slug(trigger_slug)
-            agent_prompt = (recipe or {}).get("agent_prompt") or _get_trigger_prompt()
+            base_prompt = (recipe or {}).get("agent_prompt") or _DEFAULT_TRIGGER_PROMPT
             recipe_user_id = (recipe or {}).get("user_id") or user_id
             model = (recipe or {}).get("model", "")
+
+            # Always append REPORT_RESULT_PROMPT so agent outputs structured JSON
+            from card_extractor import REPORT_RESULT_PROMPT
+            agent_prompt = base_prompt
+            if REPORT_RESULT_PROMPT not in agent_prompt:
+                agent_prompt = base_prompt + "\n\n" + REPORT_RESULT_PROMPT
 
             # Process the event via subagent with full history capture
             result = _run_autonomous_agent(
