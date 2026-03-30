@@ -493,16 +493,21 @@ class NotificationStore:
         # Always push to Desktop SSE (real-time)
         _pubsub.publish(user_id, {
             "id": notification["id"],
+            "session_id": notification["session_id"],
+            "source_type": notification["source_type"],
+            "source_id": notification.get("source_id", ""),
+            "source_name": notification["source_name"],
             "title": notification["title"],
+            "category": notification["category"],
+            "status": notification["status"],
             "summary": notification["summary"],
             "deliverables": notification["deliverables"],
-            "category": notification["category"],
-            "source_type": notification["source_type"],
-            "source_name": notification["source_name"],
-            "created_at": notification["created_at"],
-            "session_id": notification["session_id"],
             "agent_provider": notification["agent_provider"],
             "agent_duration_s": notification["agent_duration_s"],
+            "agent_tokens": notification.get("agent_tokens", 0),
+            "user_id": user_id,
+            "created_at": notification["created_at"],
+            "read_at": notification.get("read_at"),
         })
         notification["delivered_channels"].append("desktop")
 
