@@ -313,11 +313,15 @@ def _handle_trigger_event(data):
             if REPORT_RESULT_PROMPT not in agent_prompt:
                 agent_prompt = base_prompt + "\n\n" + REPORT_RESULT_PROMPT
 
+            # Tool access restrictions from recipe
+            tool_access = (recipe or {}).get("tool_access")
+
             # Process the event via subagent with full history capture
             result = _run_autonomous_agent(
                 agent_prompt, event_data, trigger_slug, trigger_id, recipe_user_id,
                 deliver_to_channels=(recipe or {}).get("channel_name"),
                 model=model,
+                tool_access=tool_access,
             )
 
             if result is None:
@@ -335,17 +339,21 @@ def _run_autonomous_agent(
     user_id: str,
     deliver_to_channels: str = None,
     model: str = "",
+    tool_access: str = None,
 ) -> str | None:
     """Run a one-shot agent to process a trigger event.
 
-    Uses the self provider (same agent_loop as the main agent) to ensure
-    full tool access and consistent behavior. The model can be specified
-    per-trigger via the recipe.
+    Uses the self provider (same agent_loop as the main agent).
+    Tool access can be restricted via the tool_access parameter.
 
     Returns the agent's response, or None if the agent decided to skip.
     """
     from subagent import get_provider
     from notifications import notification_store
+    from tools import build_restricted_tools
+
+    # Build restricted tool set if tool_access is specified
+    tools_override = build_restricted_tools(tool_access)
 
     # Format event data as the task
     event_str = json.dumps(event_data, ensure_ascii=False, default=str)
@@ -361,11 +369,13 @@ def _run_autonomous_agent(
     try:
         provider = get_provider(name="self")
         logger.info(
-            "Processing trigger %s via provider=%s, model=%s",
+            "Processing trigger %s via provider=%s, model=%s, tool_access=%s",
             trigger_slug, provider.name, model or "(default)",
+            tool_access or "full",
         )
         final_text, history, stats = provider.run_with_history(
             task=task, system_prompt=agent_prompt, model=model,
+            tools_override=tools_override,
         )
     except Exception as e:
         logger.error("Subagent error for trigger %s: %s", trigger_slug, e)
@@ -444,7 +454,8 @@ def list_available_triggers(toolkit: str) -> str:
 
 
 def create_trigger(trigger_slug: str, agent_prompt: str = None,
-                   trigger_config: dict = None, model: str = "") -> str:
+                   trigger_config: dict = None, model: str = "",
+                   tool_access: str = "full") -> str:
     """Create a new trigger instance with an optional agent_prompt and model.
 
     The agent_prompt is the system prompt for the disposable agent that
@@ -456,6 +467,7 @@ def create_trigger(trigger_slug: str, agent_prompt: str = None,
         agent_prompt: System prompt for the event-processing agent.
         trigger_config: Optional configuration dict for the trigger.
         model: LLM model for processing events. Empty = use system default.
+        tool_access: Permission preset for the subagent (read_only/read_write/safe/full).
     """
     if not is_enabled():
         return json.dumps({"error": "Composio not enabled"})
@@ -472,7 +484,7 @@ def create_trigger(trigger_slug: str, agent_prompt: str = None,
 
         trigger_id = getattr(trigger, 'trigger_id', str(trigger))
 
-        # Persist the recipe (trigger_slug + agent_prompt + model)
+        # Persist the recipe (trigger_slug + agent_prompt + model + tool_access)
         # so _handle_trigger_event can look it up later
         from context import get_context
         ctx = get_context()
@@ -484,6 +496,7 @@ def create_trigger(trigger_slug: str, agent_prompt: str = None,
             "trigger_slug": trigger_slug,
             "agent_prompt": agent_prompt or _get_trigger_prompt(),
             "model": model,
+            "tool_access": tool_access,
             "trigger_config": trigger_config,
             "user_id": current_user_id,
             "channel_name": ctx.get("channel_name", ""),
@@ -497,9 +510,11 @@ def create_trigger(trigger_slug: str, agent_prompt: str = None,
             "trigger_slug": trigger_slug,
             "has_agent_prompt": bool(agent_prompt),
             "model": model or "(system default)",
+            "tool_access": tool_access,
             "message": (
                 f"Trigger '{trigger_slug}' created successfully. "
-                f"Events will be processed by the configured agent and delivered automatically."
+                f"Events will be processed by the configured agent "
+                f"(tool_access={tool_access}) and delivered automatically."
             ),
         }, ensure_ascii=False)
     except Exception as e:

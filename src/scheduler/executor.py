@@ -80,6 +80,13 @@ def _run_task(task: dict):
     ]
     token_stats = make_empty_token_stats()
 
+    # Build restricted tool set if tool_access is specified
+    from tools import build_restricted_tools
+    tool_access = task.get("tool_access")
+    tools_override = build_restricted_tools(tool_access)
+    if tools_override:
+        logger.info("Scheduled task %s using tool_access=%s", task_id, tool_access)
+
     start_time = time.time()
     try:
         # Collect events to extract final reply
@@ -89,7 +96,8 @@ def _run_task(task: dict):
             events.append(evt)
 
         updated_history, updated_stats = agent_loop(
-            history, log_file, token_stats, on_event=on_event
+            history, log_file, token_stats, on_event=on_event,
+            tools_override=tools_override,
         )
 
         # Extract final reply

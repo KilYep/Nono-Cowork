@@ -15,6 +15,7 @@ def _is_enabled():
 
 @tool(
     name="composio_list_triggers",
+    tags=["read"],
     description=(
         "List available trigger types for a given toolkit/app. "
         "Use this to discover what events can be monitored "
@@ -41,6 +42,7 @@ def composio_list_triggers(toolkit: str) -> str:
 
 @tool(
     name="composio_create_trigger",
+    tags=["admin"],
     description=(
         "Create a new trigger to monitor events from a connected app. "
         "The trigger will automatically process events using a dedicated agent "
@@ -80,20 +82,34 @@ def composio_list_triggers(toolkit: str) -> str:
                 "type": "object",
                 "description": "Optional configuration for the trigger. Use composio_list_triggers to see required config fields.",
             },
+            "tool_access": {
+                "type": "string",
+                "description": (
+                    "Permission level for the event-processing agent's tools. "
+                    "Presets: 'read_only' (only read data), 'read_write' (read+write, no shell), "
+                    "'safe' (read+write+network, no shell), 'full' (all tools, default). "
+                    "Use 'read_only' for monitoring-only triggers, 'read_write' for triggers that "
+                    "need to download files or create drafts."
+                ),
+                "enum": ["read_only", "read_write", "safe", "full"],
+            },
         },
         "required": ["trigger_slug", "agent_prompt"],
     },
 )
 def composio_create_trigger(trigger_slug: str, agent_prompt: str,
-                            trigger_config: dict = None, model: str = "") -> str:
+                            trigger_config: dict = None, model: str = "",
+                            tool_access: str = "full") -> str:
     if not _is_enabled():
         return '{"error": "Composio is not enabled. Set COMPOSIO_API_KEY in .env."}'
     from composio_triggers import create_trigger
-    return create_trigger(trigger_slug, agent_prompt, trigger_config, model=model)
+    return create_trigger(trigger_slug, agent_prompt, trigger_config,
+                          model=model, tool_access=tool_access)
 
 
 @tool(
     name="composio_list_active_triggers",
+    tags=["read"],
     description=(
         "List all currently active triggers. "
         "Shows what events are being monitored and their status."
@@ -112,6 +128,7 @@ def composio_list_active_triggers() -> str:
 
 @tool(
     name="composio_delete_trigger",
+    tags=["admin"],
     description=(
         "Delete/disable an active trigger. "
         "Use composio_list_active_triggers to find the trigger_id first."
@@ -136,6 +153,7 @@ def composio_delete_trigger(trigger_id: str) -> str:
 
 @tool(
     name="composio_wait_for_connection",
+    tags=["admin"],
     description=(
         "Wait for a user to complete authentication for a toolkit/app. "
         "Call this IMMEDIATELY after COMPOSIO_MANAGE_CONNECTIONS returns an 'initiated' "
