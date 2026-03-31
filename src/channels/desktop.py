@@ -891,11 +891,14 @@ async def create_task_api(request: Request):
     from scheduler.store import create_task
     from scheduler import scheduler as task_scheduler
 
-    body = await request.json()
+    chunk = await request.json()
+    body = chunk
     task_name = body.get("task_name", "").strip()
     cron = body.get("cron", "").strip()
     task_prompt = body.get("task_prompt", "").strip()
     channel_name = body.get("channel_name", "desktop")
+    model = body.get("model", "").strip()
+    tool_access = body.get("tool_access", "full")
 
     if not task_name:
         return JSONResponse({"error": "Missing 'task_name'"}, status_code=400)
@@ -911,6 +914,8 @@ async def create_task_api(request: Request):
             task_prompt=task_prompt,
             user_id=DESKTOP_USER_ID,
             channel_name=channel_name,
+            model=model,
+            tool_access=tool_access,
         )
         task_scheduler.add_task(task)
         next_run = task_scheduler.get_next_run(task["id"])
@@ -947,7 +952,7 @@ async def update_task_api(task_id: str, request: Request):
 
     body = await request.json()
     updates = {}
-    for field in ("task_name", "cron", "task_prompt", "enabled"):
+    for field in ("task_name", "cron", "task_prompt", "enabled", "model", "tool_access"):
         if field in body:
             updates[field] = body[field]
 
@@ -1058,6 +1063,7 @@ async def list_triggers_api():
             "trigger_config": recipe.get("trigger_config"),
             "user_id": recipe.get("user_id", ""),
             "channel_name": recipe.get("channel_name", ""),
+            "tool_access": recipe.get("tool_access", "full"),
             "created_at": recipe.get("created_at", ""),
             "enabled": trigger_id in active_map,
             "status": info.get("status", "UNKNOWN"),
@@ -1085,8 +1091,54 @@ async def get_trigger_api(trigger_id: str):
         "trigger_config": recipe.get("trigger_config"),
         "user_id": recipe.get("user_id", ""),
         "channel_name": recipe.get("channel_name", ""),
+        "tool_access": recipe.get("tool_access", "full"),
         "created_at": recipe.get("created_at", ""),
     }
+
+@app.post("/api/triggers")
+async def create_trigger_api(request: Request):
+    """Create a new trigger recipe.
+
+    Body: {trigger_slug, agent_prompt, trigger_config?, model?, tool_access?, channel_name?}
+    """
+    from composio_triggers import create_trigger, is_enabled
+
+    if not is_enabled():
+        return JSONResponse({"error": "Composio not enabled"}, status_code=400)
+
+    body = await request.json()
+    trigger_slug = body.get("trigger_slug", "").strip()
+    agent_prompt = body.get("agent_prompt", "").strip()
+    trigger_config = body.get("trigger_config", {})
+    model = body.get("model", "").strip()
+    tool_access = body.get("tool_access", "full")
+    # We implicitly set channel_name via the execute context normally, 
+    # but here we can just set it during creation. 
+    # Let's import context.set_context just inside to mock context if missing.
+
+    if not trigger_slug:
+        return JSONResponse({"error": "Missing 'trigger_slug'"}, status_code=400)
+
+    from context import set_context, clear_context
+    set_context(user_id=DESKTOP_USER_ID, channel_name=body.get("channel_name", "desktop"))
+    try:
+        import json
+        result_str = create_trigger(
+            trigger_slug=trigger_slug,
+            agent_prompt=agent_prompt,
+            trigger_config=trigger_config,
+            model=model,
+            tool_access=tool_access
+        )
+        clear_context()
+        result = json.loads(result_str)
+        if result.get("success"):
+            return result
+        else:
+            return JSONResponse({"error": result.get("error", "Unknown error")}, status_code=400)
+    except Exception as e:
+        clear_context()
+        return JSONResponse({"error": str(e)}, status_code=500)
 
 
 @app.put("/api/triggers/{trigger_id}")
@@ -1105,7 +1157,7 @@ async def update_trigger_api(trigger_id: str, request: Request):
 
     body = await request.json()
     changed = False
-    for field in ("agent_prompt", "model", "channel_name"):
+    for field in ("agent_prompt", "model", "channel_name", "tool_access"):
         if field in body:
             recipe[field] = body[field]
             changed = True
@@ -1254,7 +1306,8 @@ async def list_automations_api():
             "description": t["task_prompt"][:200],
             "schedule": t["cron"],
             "enabled": t.get("enabled", True),
-            "model": "",
+            "model": t.get("model", ""),
+            "tool_access": t.get("tool_access", "full"),
             "channel_name": t.get("channel_name", ""),
             "user_id": t.get("user_id", ""),
             "created_at": t.get("created_at", ""),
@@ -1287,6 +1340,7 @@ async def list_automations_api():
                 "schedule": recipe.get("trigger_slug", ""),
                 "enabled": trigger_id in active_ids,
                 "model": recipe.get("model", ""),
+                "tool_access": recipe.get("tool_access", "full"),
                 "channel_name": recipe.get("channel_name", ""),
                 "user_id": recipe.get("user_id", ""),
                 "created_at": recipe.get("created_at", ""),
@@ -1361,6 +1415,8 @@ def main():
     print(f"     DELETE /api/tasks/:id                — delete cron task")
     print(f"     POST /api/tasks/:id/run              — run task now")
     print(f"     GET  /api/triggers                  — list triggers")
+    print(f"     POST /api/triggers                  — create trigger")
+    print(f"     GET  /api/triggers/:id              — get trigger")
     print(f"     PUT  /api/triggers/:id              — update trigger recipe")
     print(f"     PATCH /api/triggers/:id/toggle       — toggle trigger")
     print(f"     DELETE /api/triggers/:id             — delete trigger")
