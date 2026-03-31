@@ -17,7 +17,7 @@ import {
   FileEdit,
   CheckCircle2,
   Loader2,
-  Archive,
+  EyeOff,
 } from "lucide-react";
 
 // ═══════════════════════════════════════════
@@ -45,7 +45,7 @@ export interface Notification {
   source_name: string;
   title: string;
   category: string;
-  status: "unread" | "read" | "dismissed" | "archived";
+  status: "unread" | "read" | "dismissed" | "archived" | "resolved";
   summary: string;
   deliverables: Deliverable[];
   agent_provider: string;
@@ -180,10 +180,12 @@ function GenericDeliverableCard({
 function DeliverableCard({
   deliverable,
   isUnread,
+  notification,
   onExecuteAction,
 }: {
   deliverable: Deliverable;
   isUnread: boolean;
+  notification: Notification;
   onExecuteAction?: (actionType: string) => Promise<boolean>;
 }) {
   // Route to specialized action component if available
@@ -193,6 +195,7 @@ function DeliverableCard({
         <EmailDraftAction
           deliverable={deliverable}
           isUnread={isUnread}
+          notification={notification}
           onExecuteAction={onExecuteAction}
         />
       );
@@ -295,6 +298,7 @@ export function NotificationCard({
               key={i}
               deliverable={d}
               isUnread={isUnread}
+              notification={notification}
               onExecuteAction={
                 onExecuteAction
                   ? (actionType: string) => onExecuteAction(notification.id, actionType, i)
@@ -322,14 +326,14 @@ export function NotificationCard({
 
         <div className="flex-1" />
 
-        {/* Archive — universal lifecycle action */}
-        {notification.status !== "archived" && (
+        {/* Dismiss — universal lifecycle action */}
+        {notification.status !== "archived" && notification.status !== "dismissed" && (
           <button
             onClick={() => onArchive?.(notification)}
             className="flex items-center gap-1 px-2.5 py-1 rounded-md text-[11.5px] font-medium text-muted-foreground/30 hover:text-foreground/55 hover:bg-muted/30 transition-colors"
           >
-            <Archive size={12} />
-            <span>归档</span>
+            <EyeOff size={12} />
+            <span>忽略</span>
           </button>
         )}
 

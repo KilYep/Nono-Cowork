@@ -10,10 +10,10 @@
  */
 
 import { useState } from "react";
-import { Send, CheckCircle2, Loader2, FileEdit } from "lucide-react";
+import { Send, CheckCircle2, Loader2, FileEdit, EyeOff } from "lucide-react";
 import { Icon } from "@iconify/react";
 import { toast } from "sonner";
-import type { Deliverable } from "../notification-card";
+import type { Deliverable, Notification } from "../notification-card";
 import type { ActionStatus } from "./types";
 
 // ═══════════════════════════════════════════
@@ -23,6 +23,7 @@ import type { ActionStatus } from "./types";
 interface EmailDraftActionProps {
   deliverable: Deliverable;
   isUnread: boolean;
+  notification: Notification;
   onExecuteAction?: (actionType: string) => Promise<boolean>;
 }
 
@@ -33,6 +34,7 @@ interface EmailDraftActionProps {
 export function EmailDraftAction({
   deliverable,
   isUnread,
+  notification,
   onExecuteAction,
 }: EmailDraftActionProps) {
   const [status, setStatus] = useState<ActionStatus>("idle");
@@ -43,6 +45,19 @@ export function EmailDraftAction({
   const cc = meta.cc || "";
   const subject = meta.subject || "";
   const body = meta.body || meta.body_preview || "";
+
+  const isResolvedGlobally = notification?.status === "resolved";
+  const isArchivedGlobally = notification?.status === "archived" || notification?.status === "dismissed";
+  const globalResolvedAction = (notification as unknown as Record<string, string>)?.resolved_action;
+
+  const isSuccessState = status === "success" || isResolvedGlobally;
+  const isIgnoredState = isArchivedGlobally && !isSuccessState;
+
+  const displaySuccessMsg =
+    successMsg ||
+    (globalResolvedAction === "save_draft" ? "已保存到 Gmail 草稿箱"
+      : globalResolvedAction === "send_email" ? "邮件已发送"
+      : "已处理");
 
   const handleSaveDraft = async () => {
     if (!onExecuteAction) return;
@@ -141,10 +156,15 @@ export function EmailDraftAction({
 
       {/* ── Action bar ── */}
       <div className="flex items-center justify-end gap-3 px-4 py-3 border-t border-border/40 bg-muted/10">
-        {status === "success" ? (
+        {isSuccessState ? (
           <div className="flex items-center gap-1.5 text-[13px] font-medium text-emerald-600 dark:text-emerald-500 animate-in fade-in duration-300">
             <CheckCircle2 size={15} />
-            <span>{successMsg}</span>
+            <span>{displaySuccessMsg}</span>
+          </div>
+        ) : isIgnoredState ? (
+          <div className="flex items-center gap-1.5 text-[13px] font-medium text-muted-foreground/50 animate-in fade-in duration-300">
+            <EyeOff size={15} />
+            <span>已忽略</span>
           </div>
         ) : (
           <>

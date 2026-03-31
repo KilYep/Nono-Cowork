@@ -801,9 +801,13 @@ async def execute_notification_action(notification_id: str, request: Request):
         result_data = _json.loads(result_str)
 
         if result_data.get("successful") or (result_data.get("data") or {}).get("successful"):
-            # Mark as archived (user chose to deal with it later)
-            notification_store.archive(notification_id)
-            return {"message": "Draft saved to Gmail", "status": "draft_saved"}
+            # Mark as resolved (user took action — saved draft)
+            notification_store._update_status(
+                notification_id, "resolved",
+                resolved_at=datetime.now(timezone.utc).isoformat(),
+                resolved_action="save_draft",
+            )
+            return {"message": "Draft saved to Gmail", "status": "resolved"}
 
         return JSONResponse(
             {"error": "Failed to save draft", "details": result_data},

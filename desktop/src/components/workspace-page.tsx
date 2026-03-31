@@ -1,4 +1,5 @@
-import { CheckCheck } from "lucide-react";
+import { useState, useMemo } from "react";
+import { CheckCheck, CheckCircle2 } from "lucide-react";
 import {
   NotificationCard,
   NotificationEmpty,
@@ -6,6 +7,8 @@ import {
 } from "./notification-card";
 
 // ── Types ──
+
+type WorkspaceTab = "pending" | "done";
 
 interface WorkspacePageProps {
   notifications: Notification[];
@@ -17,6 +20,8 @@ interface WorkspacePageProps {
   onLoadDetail?: (notification: Notification) => void;
   onMarkAllRead?: () => void;
 }
+
+const DONE_STATUSES = new Set(["resolved", "archived", "dismissed"]);
 
 // ── Component ──
 
@@ -30,6 +35,23 @@ export function WorkspacePage({
   onLoadDetail,
   onMarkAllRead,
 }: WorkspacePageProps) {
+  const [tab, setTab] = useState<WorkspaceTab>("pending");
+
+  const { pending, done } = useMemo(() => {
+    const p: Notification[] = [];
+    const d: Notification[] = [];
+    for (const n of notifications) {
+      if (DONE_STATUSES.has(n.status)) {
+        d.push(n);
+      } else {
+        p.push(n);
+      }
+    }
+    return { pending: p, done: d };
+  }, [notifications]);
+
+  const activeList = tab === "pending" ? pending : done;
+
   return (
     <div className="flex-1 flex flex-col overflow-hidden">
       {/* Page header */}
@@ -46,12 +68,12 @@ export function WorkspacePage({
 
           {/* Actions */}
           <div className="flex items-center gap-2">
-            {unreadCount > 0 && (
+            {tab === "pending" && unreadCount > 0 && (
               <span className="text-[12px] text-muted-foreground/40 tabular-nums">
                 {unreadCount} unread
               </span>
             )}
-            {unreadCount > 0 && onMarkAllRead && (
+            {tab === "pending" && unreadCount > 0 && onMarkAllRead && (
               <button
                 onClick={onMarkAllRead}
                 className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-[12px] text-muted-foreground/50 hover:text-foreground/70 hover:bg-muted/50 transition-colors"
@@ -62,25 +84,55 @@ export function WorkspacePage({
             )}
           </div>
         </div>
+
+        {/* ── Tab bar ── */}
+        <div className="flex items-center gap-1 mt-4 max-w-3xl mx-auto">
+          <button
+            onClick={() => setTab("pending")}
+            className={`px-4 py-2 rounded-lg text-[13px] font-medium transition-all ${
+              tab === "pending"
+                ? "bg-foreground/8 text-foreground/80 shadow-sm"
+                : "text-muted-foreground/40 hover:text-foreground/60 hover:bg-muted/30"
+            }`}
+          >
+            待处理
+          </button>
+          <button
+            onClick={() => setTab("done")}
+            className={`px-4 py-2 rounded-lg text-[13px] font-medium transition-all ${
+              tab === "done"
+                ? "bg-foreground/8 text-foreground/80 shadow-sm"
+                : "text-muted-foreground/40 hover:text-foreground/60 hover:bg-muted/30"
+            }`}
+          >
+            已处理
+          </button>
+        </div>
       </div>
 
       {/* Notification cards */}
       <div className="flex-1 overflow-y-auto px-8 pb-8">
         <div className="max-w-3xl mx-auto flex flex-col gap-3">
-          {notifications.length === 0 ? (
-            <NotificationEmpty />
+          {activeList.length === 0 ? (
+            tab === "pending" ? (
+              <NotificationEmpty />
+            ) : (
+              <div className="flex flex-col items-center justify-center py-20 text-muted-foreground/30">
+                <CheckCircle2 size={32} className="mb-3 opacity-50" />
+                <p className="text-[14px]">暂无已处理的任务</p>
+              </div>
+            )
           ) : (
-            notifications.map((n) => (
+            activeList.map((n) => (
               <NotificationCard
                 key={n.id}
                 notification={n}
                 onOpenSession={(notif) => {
-                  // Mark as read when opening session
                   onNotificationClick?.(notif);
                   onOpenSession?.(notif);
                 }}
-                onArchive={onArchive}
-                onExecuteAction={onExecuteAction}
+                onArchive={tab === "pending" ? onArchive : undefined}
+                onExecuteAction={tab === "pending" ? onExecuteAction : undefined}
                 onLoadDetail={onLoadDetail}
               />
             ))
