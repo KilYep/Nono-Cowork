@@ -8,7 +8,8 @@ The two main exports are:
 """
 
 # Import all tool modules to trigger @tool decorator registration
-from tools import command, file_ops, web, syncthing, scheduler, memory, channel_ops, delegate  # noqa: F401
+# Note: `routines` replaces the old `scheduler` tools (unified Routines management)
+from tools import command, file_ops, web, syncthing, routines, memory, channel_ops, delegate  # noqa: F401
 
 # Re-export the registry contents
 from tools.registry import get_tools_map, get_tools_schema, resolve_allowed_tags, filter_tools_by_tags
@@ -22,12 +23,14 @@ if composio_tools.is_enabled():
     composio_tools.init()
     tools_schema = tools_schema + composio_tools.get_tools_schema()
 
-    # Register trigger management tools (LLM-callable)
+    # Register auxiliary Composio tools (discovery + auth)
+    # Note: trigger CRUD is now in `routines.py`; only composio_list_triggers
+    # and composio_wait_for_connection remain here
     from tools import composio_trigger_tools  # noqa: F401
     # Re-fetch after trigger tools are registered
     tools_map = get_tools_map()
     tools_schema_updated = get_tools_schema()
-    # Merge: keep Composio meta-tools + our trigger tools
+    # Merge: keep Composio meta-tools + our custom tools
     tools_schema = tools_schema_updated + composio_tools.get_tools_schema()
 
 

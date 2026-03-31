@@ -95,9 +95,13 @@ def _run_task(task: dict):
         def on_event(evt):
             events.append(evt)
 
+        # Model override from task config
+        model_override = task.get("model") or None
+
         updated_history, updated_stats = agent_loop(
             history, log_file, token_stats, on_event=on_event,
             tools_override=tools_override,
+            model_override=model_override,
         )
 
         # Extract final reply

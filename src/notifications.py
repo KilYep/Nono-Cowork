@@ -318,9 +318,13 @@ class NotificationStore:
 
         Returns (notifications, total_count).
         """
+        from config import OWNER_USER_ID
         all_notifs = self._load_notifications()
-        # Filter by user
-        user_notifs = [n for n in all_notifs if n.get("user_id") == user_id]
+        # Single-owner system: if requesting as OWNER_USER_ID, show ALL notifications
+        if user_id == OWNER_USER_ID:
+            user_notifs = all_notifs
+        else:
+            user_notifs = [n for n in all_notifs if n.get("user_id") == user_id]
         # Filter by status
         if status:
             user_notifs = [n for n in user_notifs if n.get("status") == status]
@@ -338,9 +342,11 @@ class NotificationStore:
 
     def unread_count(self, user_id: str) -> int:
         """Count unread notifications for a user."""
+        from config import OWNER_USER_ID
         return sum(
             1 for n in self._load_notifications()
-            if n.get("user_id") == user_id and n.get("status") == "unread"
+            if (user_id == OWNER_USER_ID or n.get("user_id") == user_id)
+            and n.get("status") == "unread"
         )
 
     # ── Status updates ──
@@ -352,12 +358,15 @@ class NotificationStore:
 
     def mark_all_read(self, user_id: str) -> int:
         """Mark all unread notifications as read. Returns count updated."""
+        from config import OWNER_USER_ID
         now = datetime.now(timezone.utc).isoformat()
         with self._lock:
             notifs = self._load_notifications()
             count = 0
             for n in notifs:
-                if n.get("user_id") == user_id and n.get("status") == "unread":
+                is_owner = (user_id == OWNER_USER_ID)
+                is_match = is_owner or n.get("user_id") == user_id
+                if is_match and n.get("status") == "unread":
                     n["status"] = "read"
                     n["read_at"] = now
                     count += 1
@@ -495,10 +504,11 @@ class NotificationStore:
     def _distribute(self, notification: dict, body: str,
                     deliver_to: list[str] = None):
         """Push notification to channels."""
+        from config import OWNER_USER_ID
         user_id = notification["user_id"]
 
-        # Always push to Desktop SSE (real-time)
-        _pubsub.publish(user_id, {
+        # Build the SSE event payload once
+        sse_event = {
             "id": notification["id"],
             "session_id": notification["session_id"],
             "source_type": notification["source_type"],
@@ -515,7 +525,14 @@ class NotificationStore:
             "user_id": user_id,
             "created_at": notification["created_at"],
             "read_at": notification.get("read_at"),
-        })
+        }
+
+        # Always push to Desktop SSE (real-time)
+        # Desktop subscribes as OWNER_USER_ID, but triggers may use IM user IDs.
+        # Publish to both to ensure delivery.
+        _pubsub.publish(user_id, sse_event)
+        if OWNER_USER_ID and OWNER_USER_ID != user_id:
+            _pubsub.publish(OWNER_USER_ID, sse_event)
         notification["delivered_channels"].append("desktop")
 
         # Optional: push to IM channels (summary only — they can't render cards)
