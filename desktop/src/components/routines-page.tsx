@@ -1,5 +1,6 @@
 import { useState, useEffect } from "react";
 import { Clock, Zap, Play, Trash2, CalendarClock, Loader2, Plus, Edit2 } from "lucide-react";
+import { RoutineEditorDialog } from "./routine-editor-dialog";
 
 // ── Types ──
 
@@ -70,6 +71,8 @@ export function RoutinesPage() {
   const [loading, setLoading] = useState(true);
   const [filter, setFilter] = useState<"all" | "cron" | "trigger">("all");
   const [actionLoading, setActionLoading] = useState<Record<string, boolean>>({});
+  const [editorOpen, setEditorOpen] = useState(false);
+  const [editingAutomation, setEditingAutomation] = useState<Automation | undefined>(undefined);
 
   useEffect(() => {
     fetchAutomations();
@@ -163,6 +166,36 @@ export function RoutinesPage() {
     }
   };
 
+  const handleSaveRoutine = async (data: any) => {
+    try {
+      const isEdit = !!editingAutomation;
+      const endpoint = data.type === "cron" 
+        ? (isEdit ? `/api/tasks/${editingAutomation!.id}` : "/api/tasks")
+        : (isEdit ? `/api/triggers/${editingAutomation!.id}` : "/api/triggers");
+
+      const method = isEdit ? "PUT" : "POST";
+      
+      const payload = data.type === "cron" 
+        ? { task_name: data.task_name, cron: data.cron, task_prompt: data.task_prompt }
+        : { trigger_slug: data.trigger_slug, agent_prompt: data.agent_prompt };
+
+      const res = await fetch(`${API_BASE}${endpoint}`, {
+        method,
+        headers: authHeaders({ "Content-Type": "application/json" }),
+        body: JSON.stringify(payload)
+      });
+
+      if (res.ok) {
+        await fetchAutomations();
+        return true;
+      }
+      return false;
+    } catch (e) {
+      console.error("Failed to save routine", e);
+      return false;
+    }
+  };
+
   const filteredAutomations = automations.filter(
     (a) => filter === "all" || a.type === filter
   );
@@ -183,7 +216,7 @@ export function RoutinesPage() {
           </div>
           <button
             className="flex items-center gap-1.5 px-3 py-1.5 bg-foreground/5 hover:bg-foreground/10 text-foreground/80 rounded-lg text-xs font-medium transition-colors cursor-pointer"
-            onClick={() => alert("Task creation wizard coming soon.")}
+            onClick={() => { setEditingAutomation(undefined); setEditorOpen(true); }}
           >
             <Plus size={14} />
             <span>New Routine</span>
@@ -323,7 +356,7 @@ export function RoutinesPage() {
                       </button>
                     )}
                     <button
-                      onClick={() => alert("Edition coming soon. For now please delete and recreate via chat.")}
+                      onClick={() => { setEditingAutomation(a); setEditorOpen(true); }}
                       className="px-2 py-1.5 text-muted-foreground hover:text-foreground hover:bg-muted rounded-md transition-colors"
                       aria-label="Edit"
                     >
@@ -348,6 +381,12 @@ export function RoutinesPage() {
           )}
         </div>
       </div>
+      <RoutineEditorDialog
+        open={editorOpen}
+        onOpenChange={setEditorOpen}
+        automation={editingAutomation}
+        onSave={handleSaveRoutine}
+      />
     </div>
   );
 }
