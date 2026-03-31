@@ -47,11 +47,21 @@ def _require_context():
                 "type": "string",
                 "description": "The natural language instruction for the Agent to execute. Be specific and complete — this will run in an independent session without conversation history.",
             },
+            "tool_access": {
+                "type": "string",
+                "description": (
+                    "Permission level for the task agent. "
+                    "'full' (all tools, default), 'read_only' (only read data), "
+                    "'read_write' (read+write, no shell), 'safe' (read+write+network, no shell)."
+                ),
+                "enum": ["read_only", "read_write", "safe", "full"],
+            },
         },
         "required": ["task_name", "cron", "task_prompt"],
     },
 )
-def create_scheduled_task(task_name: str, cron: str, task_prompt: str) -> str:
+def create_scheduled_task(task_name: str, cron: str, task_prompt: str,
+                          tool_access: str = "full") -> str:
     """Create a scheduled task."""
     ctx, err = _require_context()
     if err:
@@ -67,6 +77,7 @@ def create_scheduled_task(task_name: str, cron: str, task_prompt: str) -> str:
             task_prompt=task_prompt,
             user_id=ctx["user_id"],
             channel_name=ctx["channel_name"],
+            tool_access=tool_access,
         )
         scheduler.add_task(task)
 
@@ -185,13 +196,18 @@ def delete_scheduled_task(task_id: str) -> str:
                 "type": "boolean",
                 "description": "Set to false to pause the task, true to resume it (optional).",
             },
+            "tool_access": {
+                "type": "string",
+                "description": "Change the tool permission level (read_only/read_write/safe/full).",
+                "enum": ["read_only", "read_write", "safe", "full"],
+            },
         },
         "required": ["task_id"],
     },
 )
 def update_scheduled_task(task_id: str, cron: str = None,
                           task_prompt: str = None, task_name: str = None,
-                          enabled: bool = None) -> str:
+                          enabled: bool = None, tool_access: str = None) -> str:
     """Update a scheduled task."""
     ctx, err = _require_context()
     if err:
@@ -217,6 +233,8 @@ def update_scheduled_task(task_id: str, cron: str = None,
         updates["task_name"] = task_name
     if enabled is not None:
         updates["enabled"] = enabled
+    if tool_access is not None:
+        updates["tool_access"] = tool_access
 
     if not updates:
         return "No changes specified."

@@ -58,7 +58,8 @@ def _save_all(tasks: list[dict]):
 # ── Public API ──
 
 def create_task(task_name: str, cron: str, task_prompt: str,
-                user_id: str, channel_name: str) -> dict:
+                user_id: str, channel_name: str,
+                tool_access: str = "full") -> dict:
     """Create and persist a new scheduled task. Returns the task dict."""
     task = {
         "id": uuid.uuid4().hex[:12],
@@ -67,6 +68,7 @@ def create_task(task_name: str, cron: str, task_prompt: str,
         "task_prompt": task_prompt,
         "user_id": user_id,
         "channel_name": channel_name,
+        "tool_access": tool_access,
         "enabled": True,
         "created_at": datetime.now(timezone.utc).isoformat(),
         "last_run_at": None,
@@ -101,7 +103,7 @@ def list_tasks(user_id: str = None) -> list[dict]:
 def update_task(task_id: str, **updates) -> dict | None:
     """Update a task's fields. Returns updated task or None if not found."""
     allowed_fields = {"task_name", "cron", "task_prompt", "enabled",
-                      "last_run_at", "last_result"}
+                      "last_run_at", "last_result", "tool_access"}
     with _lock:
         tasks = _load_all()
         for t in tasks:

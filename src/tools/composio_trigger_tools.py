@@ -82,16 +82,29 @@ def composio_list_triggers(toolkit: str) -> str:
                 "type": "object",
                 "description": "Optional configuration for the trigger. Use composio_list_triggers to see required config fields.",
             },
+            "tool_access": {
+                "type": "string",
+                "description": (
+                    "Permission level for the event-processing agent's tools. "
+                    "Presets: 'read_only' (only read data), 'read_write' (read+write, no shell), "
+                    "'safe' (read+write+network, no shell), 'full' (all tools, default). "
+                    "Use 'read_only' for monitoring-only triggers, 'read_write' for triggers that "
+                    "need to download files or create drafts."
+                ),
+                "enum": ["read_only", "read_write", "safe", "full"],
+            },
         },
         "required": ["trigger_slug", "agent_prompt"],
     },
 )
 def composio_create_trigger(trigger_slug: str, agent_prompt: str,
-                            trigger_config: dict = None, model: str = "") -> str:
+                            trigger_config: dict = None, model: str = "",
+                            tool_access: str = "full") -> str:
     if not _is_enabled():
         return '{"error": "Composio is not enabled. Set COMPOSIO_API_KEY in .env."}'
     from composio_triggers import create_trigger
-    return create_trigger(trigger_slug, agent_prompt, trigger_config, model=model)
+    return create_trigger(trigger_slug, agent_prompt, trigger_config,
+                          model=model, tool_access=tool_access)
 
 
 @tool(
