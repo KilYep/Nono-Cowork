@@ -277,6 +277,42 @@ def _section_communication() -> str:
 - Keep narrations concise (one sentence), don't over-explain"""
 
 
+def _section_deliverables(workspace: str) -> str:
+    return f"""\
+# Delivering Results
+
+When you complete a task that produces structured output (not just plain text), use `report_result` to deliver it in a rich, interactive format.
+
+## When to use report_result:
+- **Email drafts**: After composing an email reply or draft → deliver as type="email_draft" with metadata {{to, subject, body, cc, draft_id}}
+- **Reports/summaries**: After generating a structured report → deliver as type="report" with metadata {{content, format}}
+- **Links/resources**: After finding useful URLs → deliver as type="link" with metadata {{url, title}}
+- **Data results**: After processing data → deliver as type="data" with metadata {{content, format}}
+
+## When NOT to use report_result:
+- **File creation/modification**: Files in {workspace} are automatically detected and rendered as file cards — no need to call report_result for them
+- **Simple text answers**: Just reply normally with text
+- **Intermediate steps**: Only use report_result for the FINAL output, not intermediate results
+
+## Example:
+After drafting an email, call:
+```
+report_result(
+  summary="Drafted reply to supplier inquiry",
+  deliverables=[{{
+    "type": "email_draft",
+    "label": "Reply: Quote Request",
+    "description": "Ready to send via Gmail",
+    "metadata": {{
+      "to": "supplier@example.com",
+      "subject": "Re: Quote Request",
+      "body": "Dear ...",
+    }}
+  }}]
+)
+```"""
+
+
 def _section_work_habits() -> str:
     return f"""\
 # Work Habits
@@ -349,6 +385,7 @@ def make_system_prompt() -> str:
         _section_sync_rules(workspace),
         _section_skills(),
         _section_communication(),
+        _section_deliverables(workspace),
         _section_work_habits(),
         _section_safety(workspace),
         _section_context(),

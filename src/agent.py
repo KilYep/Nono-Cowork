@@ -214,6 +214,13 @@ def agent_loop(history: list[dict], log_file=None, token_stats: dict = None,
             # Iterate over chunks, emit text_chunk/reasoning_chunk events in real-time,
             # accumulate full content and tool_calls for post-processing.
             active_tools = tools_override or tools_schema
+            # Inject report_result tool for structured deliverables
+            from card_extractor import REPORT_RESULT_TOOL
+            if not any(
+                t.get("function", {}).get("name") == "report_result"
+                for t in active_tools
+            ):
+                active_tools = list(active_tools) + [REPORT_RESULT_TOOL]
             stream = call_llm_stream(history, model=active_model, tools=active_tools)
 
             accumulated_content = ""
@@ -383,7 +390,12 @@ def agent_loop(history: list[dict], log_file=None, token_stats: dict = None,
                     on_event({"type": "tool_call", "tool_name": tool_name, "args": args, "round": round_num})
 
                 func = tools_map.get(tool_name)
-                if func:
+                if tool_name == "report_result":
+                    # Pass-through: data already captured via on_event hook;
+                    # frontend renders deliverables from the tool_call args.
+                    n_delivs = len(args.get("deliverables", []))
+                    tool_result = f"✅ Reported: {args.get('summary', '')} ({n_delivs} deliverable(s))"
+                elif func:
                     # Filter out hallucinated args the function doesn't accept
                     import inspect
                     sig = inspect.signature(func)

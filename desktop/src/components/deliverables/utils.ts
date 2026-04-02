@@ -135,6 +135,29 @@ class SyncPathResolver {
 
     return remotePath;
   }
+
+  /**
+   * Check if a VPS-side path is within any synced folder.
+   * Used to filter file deliverables — only sync folder files
+   * should be rendered as FileCards.
+   */
+  isSyncPath(remotePath: string): boolean {
+    if (this.mappings.length === 0) return false;
+
+    for (const m of this.mappings) {
+      if (remotePath.startsWith(m.remotePath + "/") || remotePath === m.remotePath) {
+        return true;
+      }
+    }
+
+    // Relative paths are assumed to be within sync folder
+    // (agent typically uses relative paths within the sync root)
+    if (!remotePath.startsWith("/") && !remotePath.match(/^[A-Z]:\\/)) {
+      return true;
+    }
+
+    return false;
+  }
 }
 
 export const syncPaths = new SyncPathResolver();

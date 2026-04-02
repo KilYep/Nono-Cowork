@@ -1101,7 +1101,9 @@ function App() {
 
                             if (FILE_TOOL_NAMES.includes(tn)) {
                               const fp = (p.args?.path || p.args?.file_path || p.args?.target_file) as string | undefined;
-                              if (fp) fileOps.push({ path: fp, action: tn === "edit_file" ? "modified" : "created" });
+                              if (fp && syncPaths.isSyncPath(fp)) {
+                                fileOps.push({ path: fp, action: tn === "edit_file" ? "modified" : "created" });
+                              }
                             }
                             if (tn === "report_result") {
                               const delivs = p.args?.deliverables;
