@@ -117,23 +117,23 @@ export function EmailDraftCard({
   // ── Full mode: complete Gmail-like panel ──
   return (
     <div
-      className={`rounded-xl border overflow-hidden bg-background shadow-[0_2px_8px_-2px_rgba(0,0,0,0.05)] transition-all duration-200 ${
-        isUnread ? "border-border/60" : "border-border/30"
+      className={`rounded-xl border overflow-hidden bg-background shadow-[0_2px_8px_-2px_rgba(0,0,0,0.06)] transition-all duration-200 ${
+        isUnread ? "border-border" : "border-border/60"
       }`}
     >
       {/* Header: Official Gmail Look */}
-      <div className="flex items-center gap-2.5 px-4 py-3 border-b border-border/40">
+      <div className="flex items-center gap-2.5 px-4 py-3">
         <Icon icon="logos:google-gmail" className="w-[15px] h-[15px] drop-shadow-sm" />
-        <span className="text-[13px] font-medium text-foreground/85">
+        <span className="text-[13.5px] font-semibold text-foreground/90">
           Email Draft
         </span>
       </div>
 
       {/* Email fields */}
-      <div className="px-4 pt-3 pb-1 space-y-2">
+      <div className="px-4 pt-3 pb-1 space-y-1.5">
         {to && (
           <FieldRow label="To">
-            <span className="text-[13px] text-foreground/60 break-all">
+            <span className="text-[13px] text-foreground/75 break-all">
               {to}
             </span>
             {cc && (
@@ -148,7 +148,7 @@ export function EmailDraftCard({
           <FieldRow label="Subject">
             <span
               className={`text-[13px] ${
-                isUnread ? "text-foreground/75 font-medium" : "text-foreground/55"
+                isUnread ? "text-foreground/85 font-medium" : "text-foreground/65"
               }`}
             >
               {subject}
@@ -159,18 +159,22 @@ export function EmailDraftCard({
         {body && (
           <FieldRow label="Body" alignTop>
             <div
-              className={`text-[13px] leading-[1.75] whitespace-pre-wrap pb-1 ${
-                isUnread ? "text-foreground/55" : "text-foreground/40"
+              className={`text-[13px] leading-[1.35] pb-1 ${
+                isUnread ? "text-foreground/65" : "text-foreground/50"
               }`}
             >
-              {body}
+              {body.split(/\n\s*\n/).map((paragraph, i) => (
+                <p key={i} className={i > 0 ? "mt-3" : ""} style={{ whiteSpace: "pre-wrap" }}>
+                  {paragraph.trim()}
+                </p>
+              ))}
             </div>
           </FieldRow>
         )}
       </div>
 
       {/* Action bar */}
-      <div className="flex items-center justify-end gap-3 px-4 py-3 border-t border-border/40 bg-muted/10">
+      <div className="flex items-center justify-end gap-3 px-4 py-3 bg-muted/15">
         {isSuccessState ? (
           <div className="flex items-center gap-1.5 text-[13px] font-medium text-emerald-600 dark:text-emerald-500 animate-in fade-in duration-300">
             <CheckCircle2 size={15} />
@@ -226,7 +230,7 @@ function FieldRow({
 }) {
   return (
     <div className={`flex ${alignTop ? "items-start" : "items-baseline"} gap-4`}>
-      <span className="text-[12px] text-muted-foreground/35 w-10 text-right shrink-0 leading-[1.75]">
+      <span className="text-[12px] text-muted-foreground/50 w-10 text-right shrink-0 leading-[1.5] font-medium">
         {label}
       </span>
       <div className="min-w-0 flex-1">{children}</div>

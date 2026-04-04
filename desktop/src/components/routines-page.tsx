@@ -1,6 +1,7 @@
 import { useState, useEffect } from "react";
-import { Clock, Zap, Play, Trash2, CalendarClock, Loader2, Plus, Edit2 } from "lucide-react";
+import { Clock, Zap, Play, Trash2, CalendarClock, Loader2, Plus, Edit2, AlertTriangle } from "lucide-react";
 import { RoutineEditorDialog } from "./routine-editor-dialog";
+import { toast } from "sonner";
 
 // ── Types ──
 
@@ -71,6 +72,7 @@ export function RoutinesPage() {
   const [loading, setLoading] = useState(true);
   const [filter, setFilter] = useState<"all" | "cron" | "trigger">("all");
   const [actionLoading, setActionLoading] = useState<Record<string, boolean>>({});
+  const [toggleErrors, setToggleErrors] = useState<Record<string, string>>({});
   const [editorOpen, setEditorOpen] = useState(false);
   const [editingAutomation, setEditingAutomation] = useState<Automation | undefined>(undefined);
 
@@ -96,16 +98,34 @@ export function RoutinesPage() {
     }
   };
 
+  /** Map trigger slug prefix to a human-readable app name */
+  const appNameFromSlug = (slug: string): string => {
+    const prefix = slug.split("_")[0];
+    const map: Record<string, string> = {
+      GMAIL: "Gmail",
+      SLACK: "Slack",
+      GITHUB: "GitHub",
+      GOOGLE: "Google",
+      NOTION: "Notion",
+      LINEAR: "Linear",
+      OUTLOOK: "Outlook",
+    };
+    return map[prefix] || prefix;
+  };
+
   const handleToggle = async (a: Automation) => {
     const isCron = a.type === "cron";
     const endpoint = isCron ? `/api/tasks/${a.id}/toggle` : `/api/triggers/${a.id}/toggle`;
 
+    // Clear previous error for this item
+    setToggleErrors((p) => { const next = { ...p }; delete next[a.id]; return next; });
     setActionLoading((p) => ({ ...p, [a.id]: true }));
     try {
       const res = await fetch(`${API_BASE}${endpoint}`, {
         method: "PATCH",
         headers: authHeaders({ "Content-Type": "application/json" }),
       });
+
       if (res.ok) {
         const data = await res.json();
         setAutomations((prev) =>
@@ -116,9 +136,23 @@ export function RoutinesPage() {
             return item;
           })
         );
+        return;
+      }
+
+      // ── Handle structured errors ──
+      const data = await res.json().catch(() => null);
+
+      if (res.status === 400 && data?.error_code === "connection_missing") {
+        const appName = appNameFromSlug(data.trigger_slug || a.schedule);
+        const msg = `${appName} connection expired. Please reconnect to re-enable this trigger.`;
+        toast.error(msg, { duration: 6000 });
+        setToggleErrors((p) => ({ ...p, [a.id]: msg }));
+      } else {
+        toast.error(data?.error || "Failed to toggle automation");
       }
     } catch (e) {
       console.error("Failed to toggle", e);
+      toast.error("Network error — could not reach the server");
     } finally {
       setActionLoading((p) => ({ ...p, [a.id]: false }));
     }
@@ -319,6 +353,12 @@ export function RoutinesPage() {
                                 <span>Task Disabled</span>
                               )}
                             </>
+                          )}
+                          {toggleErrors[a.id] && (
+                            <div className="flex items-center gap-1 text-amber-500">
+                              <AlertTriangle size={12} />
+                              <span className="truncate max-w-[260px]">Connection expired</span>
+                            </div>
                           )}
                         </div>
                       </div>

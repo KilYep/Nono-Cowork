@@ -54,65 +54,59 @@ export function WorkspacePage({
 
   return (
     <div className="flex-1 flex flex-col overflow-hidden">
-      {/* Page header */}
-      <div className="shrink-0 px-8 pt-6 pb-4">
-        <div className="flex items-center justify-between max-w-3xl mx-auto">
-          <div>
-            <h1 className="text-xl font-semibold text-foreground/85 tracking-tight">
+      {/* Page header — single row: title + tabs */}
+      <div className="shrink-0 px-8 pt-0 pb-2">
+        <div className="flex items-center justify-between max-w-4xl mx-auto">
+          {/* Left: title + unread badge */}
+          <div className="flex items-center gap-3">
+            <h1 className="text-lg font-semibold text-foreground/85 tracking-tight">
               Workspace
             </h1>
-            <p className="text-[13px] text-muted-foreground/50 mt-0.5">
-              Agent activity and automated task results
-            </p>
-          </div>
-
-          {/* Actions */}
-          <div className="flex items-center gap-2">
             {tab === "pending" && unreadCount > 0 && (
-              <span className="text-[12px] text-muted-foreground/40 tabular-nums">
+              <span className="text-[11px] text-muted-foreground/40 tabular-nums bg-foreground/5 px-2 py-0.5 rounded-full">
                 {unreadCount} unread
               </span>
             )}
             {tab === "pending" && unreadCount > 0 && onMarkAllRead && (
               <button
                 onClick={onMarkAllRead}
-                className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-[12px] text-muted-foreground/50 hover:text-foreground/70 hover:bg-muted/50 transition-colors"
+                className="flex items-center gap-1 px-2 py-0.5 rounded-md text-[11px] text-muted-foreground/40 hover:text-foreground/70 hover:bg-muted/50 transition-colors"
               >
-                <CheckCheck size={14} />
+                <CheckCheck size={12} />
                 <span>Mark all read</span>
               </button>
             )}
           </div>
-        </div>
 
-        {/* ── Tab bar ── */}
-        <div className="flex items-center gap-1 mt-4 max-w-3xl mx-auto">
-          <button
-            onClick={() => setTab("pending")}
-            className={`px-4 py-2 rounded-lg text-[13px] font-medium transition-all ${
-              tab === "pending"
-                ? "bg-foreground/8 text-foreground/80 shadow-sm"
-                : "text-muted-foreground/40 hover:text-foreground/60 hover:bg-muted/30"
-            }`}
-          >
-            Pending
-          </button>
-          <button
-            onClick={() => setTab("done")}
-            className={`px-4 py-2 rounded-lg text-[13px] font-medium transition-all ${
-              tab === "done"
-                ? "bg-foreground/8 text-foreground/80 shadow-sm"
-                : "text-muted-foreground/40 hover:text-foreground/60 hover:bg-muted/30"
-            }`}
-          >
-            Done
-          </button>
+          {/* Right: tab switcher */}
+          <div className="flex items-center gap-0.5 bg-foreground/[0.03] rounded-lg p-0.5">
+            <button
+              onClick={() => setTab("pending")}
+              className={`px-3 py-1 rounded-md text-[13px] font-medium transition-all ${
+                tab === "pending"
+                  ? "bg-background text-foreground/80 shadow-sm"
+                  : "text-muted-foreground/40 hover:text-foreground/60"
+              }`}
+            >
+              Pending
+            </button>
+            <button
+              onClick={() => setTab("done")}
+              className={`px-3 py-1 rounded-md text-[13px] font-medium transition-all ${
+                tab === "done"
+                  ? "bg-background text-foreground/80 shadow-sm"
+                  : "text-muted-foreground/40 hover:text-foreground/60"
+              }`}
+            >
+              Done
+            </button>
+          </div>
         </div>
       </div>
 
       {/* Notification cards */}
       <div className="flex-1 overflow-y-auto px-8 pb-8">
-        <div className="max-w-3xl mx-auto flex flex-col gap-3">
+        <div className="max-w-4xl mx-auto flex flex-col gap-3">
           {activeList.length === 0 ? (
             tab === "pending" ? (
               <NotificationEmpty />

@@ -1,4 +1,3 @@
-import { useState } from "react";
 import { getDeliverableComponent } from "./deliverables";
 import {
   Mail,
@@ -6,7 +5,6 @@ import {
   FolderSync,
   Webhook,
   Zap,
-  ChevronDown,
   MessageSquare,
   FileText,
   FilePlus,
@@ -16,7 +14,6 @@ import {
   Paperclip,
   FileEdit,
   CheckCircle2,
-  Loader2,
   EyeOff,
 } from "lucide-react";
 
@@ -142,26 +139,26 @@ function GenericDeliverableCard({
     <div
       className={`rounded-lg border px-3 py-2.5 transition-colors ${
         isUnread
-          ? "bg-muted/20 border-border/60"
-          : "bg-muted/10 border-border/40"
+          ? "bg-muted/30 border-border"
+          : "bg-muted/15 border-border/70"
       }`}
     >
       {/* Deliverable header: icon + label + description */}
       <div className="flex items-center gap-2 text-[13px]">
-        <span className="shrink-0 text-emerald-600/60">
-          <DelivIcon size={14} strokeWidth={1.6} />
+        <span className="shrink-0 text-emerald-600">
+          <DelivIcon size={14} strokeWidth={1.8} />
         </span>
         <span
           className={`font-medium truncate ${
-            isUnread ? "text-foreground/75" : "text-foreground/50"
+            isUnread ? "text-foreground/85" : "text-foreground/60"
           }`}
         >
           {deliverable.label}
         </span>
         {deliverable.description && (
           <>
-            <span className="text-muted-foreground/20">—</span>
-            <span className="text-muted-foreground/40 truncate text-[12px]">
+            <span className="text-muted-foreground/35">—</span>
+            <span className="text-muted-foreground/55 truncate text-[12px]">
               {deliverable.description}
             </span>
           </>
@@ -226,48 +223,66 @@ export function NotificationCard({
   onExecuteAction,
   onLoadDetail,
 }: NotificationCardProps) {
-  const [processExpanded, setProcessExpanded] = useState(false);
   const isUnread = notification.status === "unread";
   const summary = notification.summary || notification.preview || "";
   const deliverables = notification.deliverables || [];
 
-  const handleExpandProcess = () => {
-    if (!processExpanded && onLoadDetail) onLoadDetail(notification);
-    setProcessExpanded((p) => !p);
-  };
+
 
   return (
     <div
-      className={`rounded-xl border transition-all duration-200 ${
+      className={`rounded-xl border transition-all duration-200 hover:shadow-lg overflow-hidden ${
         isUnread
-          ? "bg-card border-border/80 shadow-sm"
-          : "bg-card/60 border-border/50"
+          ? "bg-white border-border shadow-[0_2px_12px_-2px_rgba(0,0,0,0.1)]"
+          : "bg-white/90 border-border/70 shadow-[0_1px_6px_-1px_rgba(0,0,0,0.06)]"
       }`}
     >
-      {/* ── Top bar: source + time ── */}
-      <div className="flex items-center gap-2 px-4 pt-3 pb-1">
+      {/* ── Top bar: source + time + actions ── */}
+      <div className="flex items-center gap-2 px-5 pt-3.5 pb-1">
         <div
-          className={`flex items-center gap-1.5 text-[11px] ${
-            isUnread ? "text-muted-foreground/50" : "text-muted-foreground/35"
+          className={`flex items-center gap-1.5 text-[11.5px] ${
+            isUnread ? "text-muted-foreground/70" : "text-muted-foreground/50"
           }`}
         >
           <SourceIcon notification={notification} />
-          <span>{cleanSourceName(notification)}</span>
+          <span className="font-medium">{cleanSourceName(notification)}</span>
         </div>
-        <span className="text-[11px] text-muted-foreground/25">·</span>
-        <span className="text-[11px] text-muted-foreground/30">
+        <span className="text-[11px] text-muted-foreground/30">·</span>
+        <span className="text-[11px] text-muted-foreground/40">
           {relativeTime(notification.created_at)}
         </span>
         {isUnread && (
-          <span className="ml-auto w-2 h-2 rounded-full bg-blue-500/80 shrink-0" />
+          <span className="w-2 h-2 rounded-full bg-blue-500 shrink-0" />
         )}
+
+        {/* Actions — right side */}
+        <div className="ml-auto flex items-center gap-1">
+          {onOpenSession && notification.session_id && (
+            <button
+              onClick={() => onOpenSession(notification)}
+              className="flex items-center gap-1 px-2.5 py-1 rounded-md text-[11.5px] font-medium text-muted-foreground/50 hover:text-foreground/80 hover:bg-muted/40 transition-colors"
+            >
+              <MessageSquare size={11} />
+              <span>Follow Up</span>
+            </button>
+          )}
+          {notification.status !== "archived" && notification.status !== "dismissed" && onArchive && (
+            <button
+              onClick={() => onArchive(notification)}
+              className="flex items-center gap-1 px-2.5 py-1 rounded-md text-[11.5px] font-medium text-muted-foreground/35 hover:text-foreground/65 hover:bg-muted/40 transition-colors"
+            >
+              <EyeOff size={11} />
+              <span>Skip</span>
+            </button>
+          )}
+        </div>
       </div>
 
       {/* ── Title ── */}
-      <div className="px-4 pt-1 pb-0.5">
+      <div className="px-5 pt-1 pb-0.5">
         <h3
-          className={`text-[14px] leading-snug ${
-            isUnread ? "font-semibold text-foreground/90" : "font-medium text-foreground/65"
+          className={`text-[14.5px] leading-snug ${
+            isUnread ? "font-semibold text-foreground" : "font-medium text-foreground/75"
           }`}
         >
           {cleanTitle(notification.title)}
@@ -276,10 +291,10 @@ export function NotificationCard({
 
       {/* ── Summary ── */}
       {summary && (
-        <div className="px-4 pt-1.5 pb-2">
+        <div className="px-5 pt-1.5 pb-2.5">
           <p
             className={`text-[13px] leading-relaxed ${
-              isUnread ? "text-foreground/60" : "text-muted-foreground/45"
+              isUnread ? "text-foreground/70" : "text-muted-foreground/55"
             }`}
             style={{
               display: "-webkit-box",
@@ -295,7 +310,7 @@ export function NotificationCard({
 
       {/* ── Deliverables — type-routed rendering ── */}
       {deliverables.length > 0 && (
-        <div className="px-4 pb-2 flex flex-wrap gap-2">
+        <div className="px-5 pb-3 flex flex-col gap-2">
           {deliverables.map((d, i) => (
             <DeliverableCard
               key={i}
@@ -309,67 +324,6 @@ export function NotificationCard({
               }
             />
           ))}
-        </div>
-      )}
-
-      {/* ── Footer: continue chat + archive + agent process ── */}
-      <div className="flex items-center gap-1 px-3 pb-3 border-t border-border/10 pt-2 mx-1">
-        {/* Continue chat — always available */}
-        {onOpenSession && notification.session_id && (
-          <button
-            onClick={() => {
-              onOpenSession(notification);
-            }}
-            className="flex items-center gap-1 px-2.5 py-1 rounded-md text-[11.5px] font-medium text-muted-foreground/40 hover:text-foreground/65 hover:bg-muted/30 transition-colors"
-          >
-            <MessageSquare size={12} />
-            <span>Continue</span>
-          </button>
-        )}
-
-        <div className="flex-1" />
-
-        {/* Dismiss — universal lifecycle action */}
-        {notification.status !== "archived" && notification.status !== "dismissed" && (
-          <button
-            onClick={() => onArchive?.(notification)}
-            className="flex items-center gap-1 px-2.5 py-1 rounded-md text-[11.5px] font-medium text-muted-foreground/30 hover:text-foreground/55 hover:bg-muted/30 transition-colors"
-          >
-            <EyeOff size={12} />
-            <span>Dismiss</span>
-          </button>
-        )}
-
-        {/* Agent process toggle */}
-        <button
-          onClick={handleExpandProcess}
-          className="flex items-center gap-1 px-2 py-1 rounded-md text-[11px] text-muted-foreground/30 hover:text-foreground/50 hover:bg-muted/30 transition-colors"
-        >
-          <ChevronDown
-            size={12}
-            className={`transition-transform duration-200 ${processExpanded ? "rotate-180" : ""}`}
-          />
-          <span>Agent</span>
-          {notification.agent_provider && (
-            <span className="text-muted-foreground/20">
-              · {notification.agent_provider}
-            </span>
-          )}
-          {notification.agent_duration_s > 0 && (
-            <span className="text-muted-foreground/20">
-              · {notification.agent_duration_s}s
-            </span>
-          )}
-        </button>
-      </div>
-
-      {/* ── Expanded agent process ── */}
-      {processExpanded && (
-        <div className="mx-4 mb-4 pt-2 border-t border-border/15">
-          <div className="flex items-center gap-2 text-[12px] text-muted-foreground/30 py-2">
-            <Loader2 size={12} className="animate-spin" />
-            <span>Loading agent activity...</span>
-          </div>
         </div>
       )}
     </div>
