@@ -860,27 +860,29 @@ function App() {
           activeView={activeView}
           onViewChange={setActiveView}
           unreadCount={unreadCount}
-          onNewChat={async () => {
+          onNewChat={() => {
             // If already on an empty session (no user messages), just switch to chat view
             const hasUserMessages = messages.some((m) => m.role === "user");
             if (!hasUserMessages && activeView === "chat") return;
-            if (!hasUserMessages && activeView !== "chat") {
-              // Already empty, just switch view
-              return;
-            }
-            try {
-              const res = await fetch(`${API_BASE}/api/sessions`, {
-                method: "POST",
-                headers: authHeaders(),
-              });
-              const data = await res.json();
-              // Track new session as current (it won't appear in history until it has messages)
-              if (data.session_id) setCurrentSessionId(data.session_id);
-              setMessages([]);
-              setIsStopping(false);
-              refreshStatus();
-              fetchSessions();
-            } catch { /* ignore */ }
+            if (!hasUserMessages && activeView !== "chat") return;
+
+            // Optimistic: clear UI immediately (zero delay)
+            setMessages([]);
+            setIsStopping(false);
+            setCurrentSessionId(null);
+
+            // Fire server request in background — don't block UI
+            fetch(`${API_BASE}/api/sessions`, {
+              method: "POST",
+              headers: authHeaders(),
+            })
+              .then((r) => r.json())
+              .then((data) => {
+                if (data.session_id) setCurrentSessionId(data.session_id);
+                refreshStatus();
+                fetchSessions();
+              })
+              .catch(() => {});
           }}
           onDeleteSession={async (id) => {
             try {
