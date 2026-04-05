@@ -1,18 +1,20 @@
 """
 Routines — unified agent tools for managing all automated workflows.
 
-"Routines" is the unified concept covering both:
+"Routines" is the unified concept covering:
   - Cron tasks: time-based scheduled execution (e.g., daily at 9am)
   - Triggers: event-driven execution via Composio (e.g., new Gmail message)
+  - File-drop: file sync event-driven execution (e.g., user drops file in ~/Sync/翻译/)
 
 This module provides 4 tools:
-  1. list_routines     — unified list of all cron + trigger routines
-  2. create_routine    — unified creation (type=cron|trigger)
+  1. list_routines     — unified list of all cron + trigger + file_drop routines
+  2. create_routine    — unified creation (type=cron|trigger|file_drop)
   3. update_routine    — unified update by ID (auto-detects type)
   4. manage_routine    — unified actions: delete, toggle, run
 
 ID-based auto-routing:
   - trigger IDs start with "ti_" (e.g., "ti_FuB_pbwn2kMc")
+  - file_drop IDs start with "fd_" (e.g., "fd_a1b2c3d4e5")
   - cron IDs are 12-char hex strings (e.g., "f8572599337a")
 """
 
@@ -25,9 +27,13 @@ from context import get_context
 logger = logging.getLogger("tools.routines")
 
 
-def _is_trigger_id(id: str) -> bool:
-    """Detect if an ID belongs to a trigger (vs a cron task)."""
-    return id.startswith("ti_")
+def _detect_routine_type(id: str) -> str:
+    """Detect routine type from its ID prefix."""
+    if id.startswith("ti_"):
+        return "trigger"
+    if id.startswith("fd_"):
+        return "file_drop"
+    return "cron"
 
 
 def _require_context():
@@ -121,6 +127,28 @@ def list_routines() -> str:
     except Exception as e:
         logger.warning("Failed to load trigger recipes: %s", e)
 
+    # ── File-drop rules ──
+    try:
+        from file_drop import list_rules
+        rules = list_rules()
+        for r in rules:
+            status = "✅ Enabled" if r.get("enabled", True) else "⏸️ Paused"
+            prompt = r.get("agent_prompt") or ""
+            actions_str = ", ".join(r.get("actions", ["added", "modified"]))
+            items.append(
+                f"📁 FILE-DROP ────────────────\n"
+                f"  ID:       {r['id']}\n"
+                f"  Name:     {r['name']}\n"
+                f"  Pattern:  {r['path_pattern']}\n"
+                f"  Actions:  {actions_str}\n"
+                f"  Status:   {status}\n"
+                f"  Model:    {r.get('model') or '(system default)'}\n"
+                f"  Prompt:   {prompt[:150]}{'...' if len(prompt) > 150 else ''}\n"
+                f"  Created:  {r.get('created_at', '?')}"
+            )
+    except Exception as e:
+        logger.warning("Failed to load file-drop rules: %s", e)
+
     if not items:
         return "No routines found. Use create_routine to set up a new one."
 
@@ -135,7 +163,7 @@ def list_routines() -> str:
     name="create_routine",
     tags=["admin"],
     description=(
-        "Create a new routine — either a scheduled task (cron) or an event trigger. "
+        "Create a new routine — scheduled task (cron), event trigger, or file-drop automation. "
         "\n\n"
         "For type='cron': Creates a time-based scheduled task. Provide `cron` (cron expression) "
         "and `prompt` (instructions for the agent). "
@@ -144,25 +172,35 @@ def list_routines() -> str:
         "For type='trigger': Creates an event-driven trigger via Composio. Provide `trigger_slug` "
         "(use composio_list_triggers to find it) and `prompt` (processing rules for the agent). "
         "Include [SKIP] rules to filter unimportant events."
+        "\n\n"
+        "For type='file_drop': Creates a file-sync-event automation. When a user drops/modifies "
+        "a file matching `path_pattern` in their sync folder, a disposable agent runs your `prompt`. "
+        "The path_pattern uses glob syntax relative to the sync folder root "
+        "(e.g., '翻译/*' matches any file in the 翻译/ folder, '**/*.pdf' matches all PDFs). "
+        "The agent receives the file path and can read/process/move the file."
     ),
     parameters={
         "type": "object",
         "properties": {
             "type": {
                 "type": "string",
-                "enum": ["cron", "trigger"],
-                "description": "Type of routine: 'cron' for scheduled tasks, 'trigger' for event-driven.",
+                "enum": ["cron", "trigger", "file_drop"],
+                "description": (
+                    "Type of routine: 'cron' for scheduled tasks, 'trigger' for Composio event-driven, "
+                    "'file_drop' for file sync event-driven."
+                ),
             },
             "name": {
                 "type": "string",
-                "description": "Short descriptive name (e.g., 'Daily disk check', 'Gmail monitor').",
+                "description": "Short descriptive name (e.g., 'Daily disk check', 'Gmail monitor', 'Auto translate').",
             },
             "prompt": {
                 "type": "string",
                 "description": (
                     "Detailed instructions for the agent that executes this routine. "
                     "Be specific and complete — runs in an independent session without conversation history. "
-                    "For triggers, include filtering rules (use [SKIP] to ignore unimportant events)."
+                    "For triggers/file_drop, include filtering rules (use [SKIP] to ignore unimportant events). "
+                    "For file_drop, the agent receives the file path in abs_path and can read/process it."
                 ),
             },
             "cron": {
@@ -179,6 +217,23 @@ def list_routines() -> str:
             "trigger_config": {
                 "type": "object",
                 "description": "Optional configuration for the trigger (e.g., {\"interval\": 1, \"labelIds\": \"INBOX\"}).",
+            },
+            "path_pattern": {
+                "type": "string",
+                "description": (
+                    "Glob pattern for file-drop matching (relative to sync folder root). "
+                    "Required for type='file_drop'. "
+                    "Examples: '翻译/*' (any file in 翻译/), 'inbox/**/*' (anything under inbox/ recursively), "
+                    "'报销/*.pdf' (PDFs in 报销/), '**/*.jpg' (all JPGs anywhere)."
+                ),
+            },
+            "file_actions": {
+                "type": "array",
+                "items": {"type": "string", "enum": ["added", "modified", "deleted"]},
+                "description": (
+                    "Which file actions trigger this rule. Default: ['added', 'modified']. "
+                    "Use ['added'] to only trigger on new files, not modifications."
+                ),
             },
             "model": {
                 "type": "string",
@@ -203,7 +258,8 @@ def list_routines() -> str:
 )
 def create_routine(type: str, name: str, prompt: str,
                    cron: str = None, trigger_slug: str = None,
-                   trigger_config: dict = None, model: str = "",
+                   trigger_config: dict = None, path_pattern: str = None,
+                   file_actions: list[str] = None, model: str = "",
                    tool_access: str = "full") -> str:
     """Create a new routine."""
     ctx, err = _require_context()
@@ -215,8 +271,11 @@ def create_routine(type: str, name: str, prompt: str,
     elif type == "trigger":
         return _create_trigger_routine(name, prompt, trigger_slug, trigger_config,
                                        model, tool_access, ctx)
+    elif type == "file_drop":
+        return _create_file_drop_routine(name, prompt, path_pattern, file_actions,
+                                         model, tool_access, ctx)
     else:
-        return f"❌ Unknown routine type: '{type}'. Use 'cron' or 'trigger'."
+        return f"❌ Unknown routine type: '{type}'. Use 'cron', 'trigger', or 'file_drop'."
 
 
 def _create_cron_routine(name, prompt, cron, model, tool_access, ctx) -> str:
@@ -289,6 +348,38 @@ def _create_trigger_routine(name, prompt, trigger_slug, trigger_config,
         return result
 
 
+def _create_file_drop_routine(name, prompt, path_pattern, file_actions,
+                              model, tool_access, ctx) -> str:
+    """Create a file-drop routine."""
+    if not path_pattern:
+        return "❌ Missing `path_pattern` parameter for file_drop routine. Example: '翻译/*' or '报销/*.pdf'"
+
+    from file_drop import create_rule
+
+    rule = create_rule(
+        name=name,
+        path_pattern=path_pattern,
+        agent_prompt=prompt,
+        channel_user_id=ctx["user_id"],
+        channel_name=ctx["channel_name"],
+        model=model,
+        tool_access=tool_access,
+        actions=file_actions,
+    )
+
+    actions_str = ", ".join(rule.get("actions", []))
+    return (
+        f"✅ File-drop routine created!\n"
+        f"  ID:       {rule['id']}\n"
+        f"  Name:     {name}\n"
+        f"  Pattern:  {path_pattern}\n"
+        f"  Actions:  {actions_str}\n"
+        f"  Model:    {model or '(system default)'}\n"
+        f"  The agent will automatically process files matching this pattern "
+        f"when they appear in your sync folder."
+    )
+
+
 # ─────────────────────────────────────────────
 # Tool 3: update_routine
 # ─────────────────────────────────────────────
@@ -337,8 +428,11 @@ def update_routine(id: str, name: str = None, cron: str = None,
                    prompt: str = None, model: str = None,
                    enabled: bool = None) -> str:
     """Update an existing routine by ID."""
-    if _is_trigger_id(id):
+    rtype = _detect_routine_type(id)
+    if rtype == "trigger":
         return _update_trigger_routine(id, prompt, model)
+    elif rtype == "file_drop":
+        return _update_file_drop_routine(id, name, prompt, model, enabled)
     else:
         return _update_cron_routine(id, name, cron, prompt, model, enabled)
 
@@ -420,6 +514,39 @@ def _update_trigger_routine(id, prompt, model) -> str:
     return f"✅ Routine '{id}' updated:\n" + "\n".join(changed)
 
 
+def _update_file_drop_routine(id, name, prompt, model, enabled) -> str:
+    """Update a file-drop routine."""
+    from file_drop import get_rule, update_rule
+
+    rule = get_rule(id)
+    if not rule:
+        return f"❌ File-drop routine '{id}' not found."
+
+    updates = {}
+    changed = []
+    if name is not None:
+        updates["name"] = name
+        changed.append(f"  Name:   {name}")
+    if prompt is not None:
+        updates["agent_prompt"] = prompt
+        changed.append(f"  Prompt: {prompt[:100]}...")
+    if model is not None:
+        updates["model"] = model
+        changed.append(f"  Model:  {model or '(system default)'}")
+    if enabled is not None:
+        updates["enabled"] = enabled
+        changed.append(f"  Status: {'✅ Enabled' if enabled else '⏸️ Paused'}")
+
+    if not updates:
+        return "No changes specified."
+
+    updated = update_rule(id, **updates)
+    if not updated:
+        return f"❌ Failed to update routine '{id}'."
+
+    return f"✅ Routine '{id}' updated:\n" + "\n".join(changed)
+
+
 # ─────────────────────────────────────────────
 # Tool 4: manage_routine
 # ─────────────────────────────────────────────
@@ -463,8 +590,10 @@ def manage_routine(id: str, action: str) -> str:
 
 
 def _delete_routine(id) -> str:
-    """Delete a routine (cron or trigger)."""
-    if _is_trigger_id(id):
+    """Delete a routine (cron, trigger, or file_drop)."""
+    rtype = _detect_routine_type(id)
+
+    if rtype == "trigger":
         from composio_triggers import delete_trigger, is_enabled
         if not is_enabled():
             return "❌ Composio is not enabled."
@@ -476,6 +605,15 @@ def _delete_routine(id) -> str:
             return f"❌ Failed to delete: {data.get('error', 'Unknown error')}"
         except (json.JSONDecodeError, TypeError):
             return result
+
+    elif rtype == "file_drop":
+        from file_drop import get_rule, delete_rule
+        rule = get_rule(id)
+        if not rule:
+            return f"❌ File-drop routine '{id}' not found."
+        delete_rule(id)
+        return f"✅ File-drop routine '{id}' ({rule['name']}) deleted."
+
     else:
         from scheduler.store import get_task, delete_task
         from scheduler.engine import scheduler
@@ -491,8 +629,11 @@ def _delete_routine(id) -> str:
 
 def _toggle_routine(id) -> str:
     """Toggle a routine's enabled state."""
-    if _is_trigger_id(id):
+    rtype = _detect_routine_type(id)
+    if rtype == "trigger":
         return _toggle_trigger(id)
+    elif rtype == "file_drop":
+        return _toggle_file_drop(id)
     else:
         return _toggle_cron(id)
 
@@ -594,10 +735,26 @@ def _toggle_trigger(id) -> str:
             return f"❌ Failed to re-enable: {e}"
 
 
+def _toggle_file_drop(id) -> str:
+    """Toggle a file-drop routine on/off."""
+    from file_drop import get_rule, update_rule
+
+    rule = get_rule(id)
+    if not rule:
+        return f"❌ File-drop routine '{id}' not found."
+
+    new_state = not rule.get("enabled", True)
+    update_rule(id, enabled=new_state)
+
+    status = "✅ Enabled" if new_state else "⏸️ Paused"
+    return f"✅ Routine '{id}' ({rule['name']}) → {status}"
+
+
 def _run_routine(id) -> str:
     """Manually execute a cron routine once."""
-    if _is_trigger_id(id):
-        return "❌ Manual execution is only available for cron routines, not triggers."
+    rtype = _detect_routine_type(id)
+    if rtype != "cron":
+        return f"❌ Manual execution is only available for cron routines, not {rtype}s."
 
     from scheduler.store import get_task
     from scheduler.executor import execute_task

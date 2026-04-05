@@ -1484,14 +1484,14 @@ async def delete_trigger_api(trigger_id: str):
 
 @app.get("/api/automations")
 async def list_automations_api():
-    """Unified view: returns ALL cron tasks + trigger recipes in a consistent shape.
+    """Unified view: returns ALL cron tasks + trigger recipes + file-drop rules in a consistent shape.
 
     Each item has:
       - id: unique identifier
-      - type: "cron" | "trigger"
+      - type: "cron" | "trigger" | "file_drop"
       - name: human-readable name
       - description: what this automation does (prompt preview)
-      - schedule: cron expression (cron only) or trigger_slug (trigger only)
+      - schedule: cron expression (cron), trigger_slug (trigger), or path_pattern (file_drop)
       - enabled: bool
       - model: LLM model override (empty = default)
       - channel_name: delivery channel
@@ -1560,6 +1560,30 @@ async def list_automations_api():
                 "config": recipe,  # full recipe
             })
 
+    # ── File-drop rules ──
+    try:
+        from file_drop import list_rules
+        for r in list_rules():
+            items.append({
+                "id": r["id"],
+                "type": "file_drop",
+                "name": r["name"],
+                "description": (r.get("agent_prompt") or "")[:200],
+                "schedule": r["path_pattern"],  # "schedule" field doubles as pattern for file_drop
+                "enabled": r.get("enabled", True),
+                "model": r.get("model", ""),
+                "tool_access": r.get("tool_access", "full"),
+                "channel_name": r.get("channel_name", ""),
+                "channel_user_id": r.get("channel_user_id", ""),
+                "created_at": r.get("created_at", ""),
+                "last_run_at": None,
+                "last_result": "",
+                "next_run_at": None,
+                "config": r,  # full rule
+            })
+    except Exception as e:
+        logger.warning("Failed to load file-drop rules for automations: %s", e)
+
     # Sort by created_at descending
     items.sort(key=lambda x: x.get("created_at") or "", reverse=True)
 
@@ -1569,8 +1593,332 @@ async def list_automations_api():
         "counts": {
             "cron": sum(1 for x in items if x["type"] == "cron"),
             "trigger": sum(1 for x in items if x["type"] == "trigger"),
+            "file_drop": sum(1 for x in items if x["type"] == "file_drop"),
         },
     }
+
+
+# ── Helper: detect automation type from ID prefix ──
+
+def _detect_automation_type(automation_id: str) -> str:
+    """Detect automation type from ID prefix: fd_ → file_drop, ti_ → trigger, else → cron."""
+    if automation_id.startswith("fd_"):
+        return "file_drop"
+    if automation_id.startswith("ti_"):
+        return "trigger"
+    return "cron"
+
+
+@app.post("/api/automations")
+async def create_automation_api(request: Request):
+    """Unified creation endpoint. Body must include `type` field.
+
+    For type='cron':      {type, task_name, cron, task_prompt, model?, tool_access?}
+    For type='trigger':   {type, trigger_slug, agent_prompt, trigger_config?, model?, tool_access?}
+    For type='file_drop': {type, name, path_pattern, agent_prompt, file_actions?, model?, tool_access?}
+    """
+    body = await request.json()
+    atype = body.get("type", "").strip()
+
+    if not atype:
+        return JSONResponse({"error": "Missing 'type' field (cron | trigger | file_drop)"}, status_code=400)
+
+    if atype == "cron":
+        # Delegate to existing create task logic
+        from scheduler.store import create_task
+        from scheduler import scheduler as task_scheduler
+
+        task_name = body.get("task_name", body.get("name", "")).strip()
+        cron = body.get("cron", body.get("schedule", "")).strip()
+        task_prompt = body.get("task_prompt", body.get("prompt", "")).strip()
+        model = body.get("model", "").strip()
+        tool_access = body.get("tool_access", "full")
+
+        if not task_name:
+            return JSONResponse({"error": "Missing 'task_name'"}, status_code=400)
+        if not cron:
+            return JSONResponse({"error": "Missing 'cron'"}, status_code=400)
+        if not task_prompt:
+            return JSONResponse({"error": "Missing 'task_prompt'"}, status_code=400)
+
+        try:
+            task = create_task(
+                task_name=task_name, cron=cron, task_prompt=task_prompt,
+                channel_user_id=DESKTOP_USER_ID, channel_name="desktop",
+                model=model, tool_access=tool_access,
+            )
+            task_scheduler.add_task(task)
+            next_run = task_scheduler.get_next_run(task["id"])
+            return {**task, "type": "cron", "next_run_at": next_run}
+        except ValueError as e:
+            return JSONResponse({"error": str(e)}, status_code=400)
+
+    elif atype == "trigger":
+        # Delegate to existing create trigger logic
+        from composio_triggers import create_trigger, is_enabled as composio_enabled
+        import json as _json
+
+        if not composio_enabled():
+            return JSONResponse({"error": "Composio not enabled"}, status_code=400)
+
+        trigger_slug = body.get("trigger_slug", "").strip()
+        agent_prompt = body.get("agent_prompt", body.get("prompt", "")).strip()
+        trigger_config = body.get("trigger_config", {})
+        model = body.get("model", "").strip()
+        tool_access = body.get("tool_access", "full")
+
+        if not trigger_slug:
+            return JSONResponse({"error": "Missing 'trigger_slug'"}, status_code=400)
+
+        from context import set_context, clear_context
+        set_context(user_id=DESKTOP_USER_ID, channel_name="desktop")
+        try:
+            result_str = create_trigger(
+                trigger_slug=trigger_slug, agent_prompt=agent_prompt,
+                trigger_config=trigger_config, model=model, tool_access=tool_access,
+            )
+            clear_context()
+            result = _json.loads(result_str)
+            if result.get("success"):
+                result["type"] = "trigger"
+                return result
+            return JSONResponse({"error": result.get("error", "Unknown error")}, status_code=400)
+        except Exception as e:
+            clear_context()
+            return JSONResponse({"error": str(e)}, status_code=500)
+
+    elif atype == "file_drop":
+        from file_drop import create_rule
+
+        name = body.get("name", "").strip()
+        path_pattern = body.get("path_pattern", body.get("schedule", "")).strip()
+        agent_prompt = body.get("agent_prompt", body.get("prompt", "")).strip()
+        file_actions = body.get("file_actions", body.get("actions"))
+        model = body.get("model", "").strip()
+        tool_access = body.get("tool_access", "full")
+
+        if not name:
+            return JSONResponse({"error": "Missing 'name'"}, status_code=400)
+        if not path_pattern:
+            return JSONResponse({"error": "Missing 'path_pattern'"}, status_code=400)
+        if not agent_prompt:
+            return JSONResponse({"error": "Missing 'agent_prompt'"}, status_code=400)
+
+        rule = create_rule(
+            name=name, path_pattern=path_pattern, agent_prompt=agent_prompt,
+            channel_user_id=DESKTOP_USER_ID, channel_name="desktop",
+            model=model, tool_access=tool_access, actions=file_actions,
+        )
+        return {**rule, "type": "file_drop"}
+
+    else:
+        return JSONResponse({"error": f"Unknown type: '{atype}'. Use 'cron', 'trigger', or 'file_drop'."}, status_code=400)
+
+
+@app.get("/api/automations/{automation_id}")
+async def get_automation_api(automation_id: str):
+    """Get a single automation by ID (auto-detects type from ID prefix)."""
+    atype = _detect_automation_type(automation_id)
+
+    if atype == "cron":
+        from scheduler.store import get_task
+        from scheduler import scheduler as task_scheduler
+        task = get_task(automation_id)
+        if not task:
+            return JSONResponse({"error": "Cron task not found"}, status_code=404)
+        next_run = task_scheduler.get_next_run(automation_id)
+        return {**task, "type": "cron", "next_run_at": next_run}
+
+    elif atype == "trigger":
+        from composio_triggers import _load_recipes
+        recipes = _load_recipes()
+        recipe = recipes.get(automation_id)
+        if not recipe:
+            return JSONResponse({"error": "Trigger not found"}, status_code=404)
+        return {"id": automation_id, "type": "trigger", **recipe}
+
+    elif atype == "file_drop":
+        from file_drop import get_rule
+        rule = get_rule(automation_id)
+        if not rule:
+            return JSONResponse({"error": "File-drop rule not found"}, status_code=404)
+        return {**rule, "type": "file_drop"}
+
+
+@app.put("/api/automations/{automation_id}")
+async def update_automation_api(automation_id: str, request: Request):
+    """Update an automation's editable fields by ID (auto-detects type).
+
+    Body: {name?, prompt/task_prompt/agent_prompt?, cron?, model?, tool_access?, enabled?, path_pattern?, file_actions?}
+    """
+    body = await request.json()
+    atype = _detect_automation_type(automation_id)
+
+    if atype == "cron":
+        from scheduler.store import get_task, update_task
+        from scheduler import scheduler as task_scheduler
+
+        task = get_task(automation_id)
+        if not task:
+            return JSONResponse({"error": "Cron task not found"}, status_code=404)
+
+        updates = {}
+        for field in ("task_name", "cron", "task_prompt", "enabled", "model", "tool_access"):
+            if field in body:
+                updates[field] = body[field]
+        # Accept unified field names too
+        if "name" in body and "task_name" not in body:
+            updates["task_name"] = body["name"]
+        if "prompt" in body and "task_prompt" not in body:
+            updates["task_prompt"] = body["prompt"]
+
+        if not updates:
+            return JSONResponse({"error": "No fields to update"}, status_code=400)
+
+        try:
+            updated = update_task(automation_id, **updates)
+            if not updated:
+                return JSONResponse({"error": "Update failed"}, status_code=500)
+            if "cron" in updates or "enabled" in updates:
+                task_scheduler.update_task_schedule(
+                    automation_id, cron=updates.get("cron"), enabled=updates.get("enabled"),
+                )
+            next_run = task_scheduler.get_next_run(automation_id)
+            return {**updated, "type": "cron", "next_run_at": next_run}
+        except ValueError as e:
+            return JSONResponse({"error": str(e)}, status_code=400)
+
+    elif atype == "trigger":
+        from composio_triggers import _load_recipes, _save_recipes
+        recipes = _load_recipes()
+        recipe = recipes.get(automation_id)
+        if not recipe:
+            return JSONResponse({"error": "Trigger not found"}, status_code=404)
+
+        changed = False
+        for field in ("agent_prompt", "model", "channel_name", "tool_access"):
+            if field in body:
+                recipe[field] = body[field]
+                changed = True
+        # Accept unified field names
+        if "prompt" in body and "agent_prompt" not in body:
+            recipe["agent_prompt"] = body["prompt"]
+            changed = True
+
+        if not changed:
+            return JSONResponse({"error": "No fields to update"}, status_code=400)
+
+        recipes[automation_id] = recipe
+        _save_recipes(recipes)
+        return {"id": automation_id, "type": "trigger", **recipe, "message": "Updated"}
+
+    elif atype == "file_drop":
+        from file_drop import get_rule, update_rule
+
+        rule = get_rule(automation_id)
+        if not rule:
+            return JSONResponse({"error": "File-drop rule not found"}, status_code=404)
+
+        updates = {}
+        for field in ("name", "path_pattern", "agent_prompt", "model", "tool_access", "actions", "enabled"):
+            if field in body:
+                updates[field] = body[field]
+        # Accept unified field names
+        if "prompt" in body and "agent_prompt" not in body:
+            updates["agent_prompt"] = body["prompt"]
+        if "file_actions" in body and "actions" not in body:
+            updates["actions"] = body["file_actions"]
+
+        if not updates:
+            return JSONResponse({"error": "No fields to update"}, status_code=400)
+
+        updated = update_rule(automation_id, **updates)
+        if not updated:
+            return JSONResponse({"error": "Update failed"}, status_code=500)
+        return {**updated, "type": "file_drop", "message": "Updated"}
+
+
+@app.patch("/api/automations/{automation_id}/toggle")
+async def toggle_automation_api(automation_id: str):
+    """Toggle an automation's enabled/disabled state by ID (auto-detects type)."""
+    atype = _detect_automation_type(automation_id)
+
+    if atype == "cron":
+        from scheduler.store import get_task, update_task
+        from scheduler import scheduler as task_scheduler
+
+        task = get_task(automation_id)
+        if not task:
+            return JSONResponse({"error": "Cron task not found"}, status_code=404)
+
+        new_enabled = not task.get("enabled", True)
+        updated = update_task(automation_id, enabled=new_enabled)
+        task_scheduler.update_task_schedule(automation_id, enabled=new_enabled)
+        next_run = task_scheduler.get_next_run(automation_id)
+        return {**updated, "type": "cron", "next_run_at": next_run}
+
+    elif atype == "trigger":
+        # Reuse the existing toggle endpoint logic
+        return await toggle_trigger_api(automation_id)
+
+    elif atype == "file_drop":
+        from file_drop import get_rule, update_rule
+
+        rule = get_rule(automation_id)
+        if not rule:
+            return JSONResponse({"error": "File-drop rule not found"}, status_code=404)
+
+        new_enabled = not rule.get("enabled", True)
+        updated = update_rule(automation_id, enabled=new_enabled)
+        return {**updated, "type": "file_drop"}
+
+
+@app.delete("/api/automations/{automation_id}")
+async def delete_automation_api(automation_id: str):
+    """Delete an automation by ID (auto-detects type)."""
+    atype = _detect_automation_type(automation_id)
+
+    if atype == "cron":
+        from scheduler.store import get_task, delete_task
+        from scheduler import scheduler as task_scheduler
+
+        task = get_task(automation_id)
+        if not task:
+            return JSONResponse({"error": "Cron task not found"}, status_code=404)
+        task_scheduler.remove_task(automation_id)
+        delete_task(automation_id)
+        return {"message": f"Cron task '{automation_id}' deleted", "id": automation_id, "type": "cron"}
+
+    elif atype == "trigger":
+        # Reuse existing delete logic
+        return await delete_trigger_api(automation_id)
+
+    elif atype == "file_drop":
+        from file_drop import get_rule, delete_rule
+
+        rule = get_rule(automation_id)
+        if not rule:
+            return JSONResponse({"error": "File-drop rule not found"}, status_code=404)
+        delete_rule(automation_id)
+        return {"message": f"File-drop rule '{automation_id}' deleted", "id": automation_id, "type": "file_drop"}
+
+
+@app.post("/api/automations/{automation_id}/run")
+async def run_automation_api(automation_id: str):
+    """Manually trigger a cron automation to run now. Only works for cron type."""
+    atype = _detect_automation_type(automation_id)
+    if atype != "cron":
+        return JSONResponse({"error": f"Manual run is only available for cron automations, not {atype}"}, status_code=400)
+
+    from scheduler.store import get_task
+    from scheduler.executor import execute_task
+
+    task = get_task(automation_id)
+    if not task:
+        return JSONResponse({"error": "Cron task not found"}, status_code=404)
+
+    execute_task(task)
+    return {"message": f"Task '{automation_id}' triggered", "id": automation_id}
 
 
 # ── Entry point ──
@@ -1617,21 +1965,17 @@ def main():
     print(f"     PUT  /api/models/current            — switch model")
     print(f"     GET  /api/notifications             — notification list")
     print(f"     GET  /api/notifications/stream      — SSE notification push")
-    print(f"     GET  /api/automations               — all tasks + triggers")
-    print(f"     GET  /api/tasks                     — list cron tasks")
-    print(f"     POST /api/tasks                     — create cron task")
-    print(f"     PUT  /api/tasks/:id                 — update cron task")
-    print(f"     PATCH /api/tasks/:id/toggle          — toggle cron task")
-    print(f"     DELETE /api/tasks/:id                — delete cron task")
-    print(f"     POST /api/tasks/:id/run              — run task now")
-    print(f"     GET  /api/triggers                  — list triggers")
-    print(f"     POST /api/triggers                  — create trigger")
-    print(f"     GET  /api/triggers/:id              — get trigger")
-    print(f"     PUT  /api/triggers/:id              — update trigger recipe")
-    print(f"     PATCH /api/triggers/:id/toggle       — toggle trigger")
-    print(f"     DELETE /api/triggers/:id             — delete trigger")
-    print(f"     GET  /api/health                   — health check")
-    print(f"     POST /api/command/                 — slash command (IM compat)")
+    print(f"     --- Unified Automations ---")
+    print(f"     GET  /api/automations               — list all (cron+trigger+file_drop)")
+    print(f"     POST /api/automations               — create (type: cron|trigger|file_drop)")
+    print(f"     GET  /api/automations/:id           — get by ID")
+    print(f"     PUT  /api/automations/:id           — update by ID")
+    print(f"     PATCH /api/automations/:id/toggle    — toggle enable/disable")
+    print(f"     DELETE /api/automations/:id          — delete by ID")
+    print(f"     POST /api/automations/:id/run        — run now (cron only)")
+    print(f"     --- Legacy (backward compat) ---")
+    print(f"     /api/tasks/*                        — cron CRUD")
+    print(f"     /api/triggers/*                     — trigger CRUD")
     print("=" * 50)
 
     uvicorn.run(app, host="0.0.0.0", port=DESKTOP_PORT, log_level="info")

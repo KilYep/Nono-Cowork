@@ -77,6 +77,10 @@ def main():
     from syncthing_watcher import start_watcher as start_sync_watcher
     start_sync_watcher()
 
+    # File-drop automation (must start AFTER sync watcher)
+    from file_drop import start_file_drop_listener
+    start_file_drop_listener()
+
     # ── 3. Create and register channels ──
     desktop_info = None
 
