@@ -6,7 +6,7 @@ import {
   Clock,
   Trash2,
   ChevronRight,
-  Zap,
+  LayoutDashboard,
   Repeat,
 } from "lucide-react";
 
@@ -140,7 +140,7 @@ export function Sidebar({
                   : "text-sidebar-foreground/55 hover:bg-sidebar-accent hover:text-sidebar-foreground/80"
               }`}
             >
-              <Zap size={16} strokeWidth={1.5} />
+              <LayoutDashboard size={16} strokeWidth={1.5} />
               <span>Workspace</span>
               {unreadCount > 0 && (
                 <span className="ml-auto flex items-center justify-center min-w-[18px] h-[18px] px-1 rounded-full bg-blue-500/15 text-[11px] font-medium text-blue-500 tabular-nums">

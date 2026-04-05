@@ -4,7 +4,7 @@ import {
   Clock as ClockIcon,
   FolderSync,
   Webhook,
-  Zap,
+  LayoutDashboard,
   MessageSquare,
   FileText,
   FilePlus,
@@ -67,7 +67,7 @@ const SOURCE_ICONS: Record<string, typeof Mail> = {
 
 const CATEGORY_ICONS: Record<string, typeof Mail> = {
   email: Mail,
-  code: Zap,
+  code: FileText,
   file: FolderSync,
   report: FileText,
 };
@@ -89,7 +89,7 @@ function SourceIcon({ notification }: { notification: Notification }) {
   const Icon =
     CATEGORY_ICONS[notification.category] ||
     SOURCE_ICONS[notification.source_type] ||
-    Zap;
+    LayoutDashboard;
   return <Icon size={13} strokeWidth={1.5} />;
 }
 
@@ -221,7 +221,7 @@ export function NotificationCard({
   onOpenSession,
   onArchive,
   onExecuteAction,
-  onLoadDetail,
+  onLoadDetail: _onLoadDetail,
 }: NotificationCardProps) {
   const isUnread = notification.status === "unread";
   const summary = notification.summary || notification.preview || "";
@@ -338,7 +338,7 @@ export function NotificationEmpty() {
   return (
     <div className="flex flex-col items-center justify-center text-muted-foreground/30 gap-3 py-20">
       <div className="p-4 rounded-2xl bg-muted/20">
-        <Zap size={32} strokeWidth={1.2} />
+        <LayoutDashboard size={32} strokeWidth={1.2} />
       </div>
       <div className="text-center">
         <p className="text-sm font-medium text-foreground/25">No activity yet</p>

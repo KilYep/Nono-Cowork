@@ -1,4 +1,4 @@
-import { useState, useMemo } from "react";
+import { useState, useMemo, useCallback, useRef, useEffect } from "react";
 import { CheckCheck, CheckCircle2 } from "lucide-react";
 import {
   NotificationCard,
@@ -23,6 +23,9 @@ interface WorkspacePageProps {
 
 const DONE_STATUSES = new Set(["resolved", "archived", "dismissed"]);
 
+// Animation duration in ms — must match CSS transition
+const EXIT_DURATION = 380;
+
 // ── Component ──
 
 export function WorkspacePage({
@@ -37,6 +40,12 @@ export function WorkspacePage({
 }: WorkspacePageProps) {
   const [tab, setTab] = useState<WorkspaceTab>("pending");
 
+  // Track which notification IDs are currently animating out
+  const [exitingIds, setExitingIds] = useState<Set<string>>(new Set());
+
+  // Refs for measuring card heights (for smooth collapse)
+  const cardRefs = useRef<Map<string, HTMLDivElement>>(new Map());
+
   const { pending, done } = useMemo(() => {
     const p: Notification[] = [];
     const d: Notification[] = [];
@@ -50,7 +59,84 @@ export function WorkspacePage({
     return { pending: p, done: d };
   }, [notifications]);
 
+  // Include cards that are exiting (they need to stay rendered during animation)
   const activeList = tab === "pending" ? pending : done;
+
+  // Detect when a card moved from pending → done (optimistic update)
+  // and trigger the exit animation
+  const prevPendingIdsRef = useRef<Set<string>>(new Set());
+
+  useEffect(() => {
+    if (tab !== "pending") {
+      prevPendingIdsRef.current = new Set(pending.map((n) => n.id));
+      return;
+    }
+
+    const prevIds = prevPendingIdsRef.current;
+    const currentIds = new Set(pending.map((n) => n.id));
+
+    // Find IDs that were in pending but no longer are
+    const removedIds = new Set<string>();
+    for (const id of prevIds) {
+      if (!currentIds.has(id)) {
+        removedIds.add(id);
+      }
+    }
+
+    if (removedIds.size > 0) {
+      setExitingIds((prev) => {
+        const next = new Set(prev);
+        for (const id of removedIds) next.add(id);
+        return next;
+      });
+
+      // Clean up after animation completes
+      setTimeout(() => {
+        setExitingIds((prev) => {
+          const next = new Set(prev);
+          for (const id of removedIds) next.delete(id);
+          return next;
+        });
+      }, EXIT_DURATION);
+    }
+
+    prevPendingIdsRef.current = currentIds;
+  }, [pending, tab]);
+
+  // Build the display list: active items + exiting items (from notifications)
+  const displayList = useMemo(() => {
+    if (tab !== "pending" || exitingIds.size === 0) return activeList;
+
+    // Get the exiting notifications from the full list
+    const exitingNotifs = notifications.filter((n) => exitingIds.has(n.id));
+    // Merge: show both current pending AND exiting cards
+    const merged = [...activeList];
+    for (const exitNotif of exitingNotifs) {
+      if (!merged.find((n) => n.id === exitNotif.id)) {
+        merged.push(exitNotif);
+      }
+    }
+    // Sort to maintain original order (by created_at descending)
+    merged.sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime());
+    return merged;
+  }, [activeList, exitingIds, notifications, tab]);
+
+  // Wrap onArchive to trigger exit animation
+  const handleArchive = useCallback(
+    (notification: Notification) => {
+      onArchive?.(notification);
+    },
+    [onArchive]
+  );
+
+  // Wrap onExecuteAction (the parent already does optimistic update)
+  const handleExecuteAction = useCallback(
+    async (notificationId: string, actionType: string, deliverableIndex: number): Promise<boolean> => {
+      if (!onExecuteAction) return false;
+      return onExecuteAction(notificationId, actionType, deliverableIndex);
+    },
+    [onExecuteAction]
+  );
 
   return (
     <div className="flex-1 flex flex-col overflow-hidden">
@@ -107,7 +193,7 @@ export function WorkspacePage({
       {/* Notification cards */}
       <div className="flex-1 overflow-y-auto px-8 pb-8">
         <div className="max-w-4xl mx-auto flex flex-col gap-3">
-          {activeList.length === 0 ? (
+          {displayList.length === 0 ? (
             tab === "pending" ? (
               <NotificationEmpty />
             ) : (
@@ -117,19 +203,31 @@ export function WorkspacePage({
               </div>
             )
           ) : (
-            activeList.map((n) => (
-              <NotificationCard
-                key={n.id}
-                notification={n}
-                onOpenSession={(notif) => {
-                  onNotificationClick?.(notif);
-                  onOpenSession?.(notif);
-                }}
-                onArchive={tab === "pending" ? onArchive : undefined}
-                onExecuteAction={tab === "pending" ? onExecuteAction : undefined}
-                onLoadDetail={onLoadDetail}
-              />
-            ))
+            displayList.map((n) => {
+              const isExiting = exitingIds.has(n.id);
+              return (
+                <div
+                  key={n.id}
+                  ref={(el) => {
+                    if (el) cardRefs.current.set(n.id, el);
+                    else cardRefs.current.delete(n.id);
+                  }}
+                  className={isExiting ? "notification-card-exit" : undefined}
+                  style={isExiting ? { pointerEvents: "none" } : undefined}
+                >
+                  <NotificationCard
+                    notification={n}
+                    onOpenSession={(notif) => {
+                      onNotificationClick?.(notif);
+                      onOpenSession?.(notif);
+                    }}
+                    onArchive={tab === "pending" ? handleArchive : undefined}
+                    onExecuteAction={tab === "pending" ? handleExecuteAction : undefined}
+                    onLoadDetail={onLoadDetail}
+                  />
+                </div>
+              );
+            })
           )}
         </div>
       </div>

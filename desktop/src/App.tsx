@@ -1,5 +1,5 @@
 import { useState, useCallback, useRef, useEffect } from "react";
-import { Toaster } from "sonner";
+import { Toaster, toast } from "sonner";
 
 // Electron window control API exposed via preload
 declare global {
@@ -574,18 +574,42 @@ function App() {
   }, [fetchNotifications]);
 
   const handleArchive = useCallback(async (notification: Notification) => {
+    // Save snapshot for rollback
+    const prevNotifications = notifications;
+    const prevUnread = unreadCount;
+
+    // Optimistic update — move card to "done" immediately
+    setNotifications((prev) =>
+      prev.map((n) =>
+        n.id === notification.id ? { ...n, status: "dismissed" as const } : n
+      )
+    );
+    if (notification.status === "unread") {
+      setUnreadCount((prev) => Math.max(0, prev - 1));
+    }
+
     try {
-      await fetch(`${API_BASE}/api/notifications/${notification.id}/action`, {
+      const res = await fetch(`${API_BASE}/api/notifications/${notification.id}/action`, {
         method: "POST",
         headers: authHeaders({ "Content-Type": "application/json" }),
         body: JSON.stringify({ action_type: "archive" }),
       });
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      // Sync with server truth (in background)
       fetchNotifications();
     } catch {
-      // ignore
+      // Revert to exact previous state
+      setNotifications(prevNotifications);
+      setUnreadCount(prevUnread);
+      toast.error("Failed to skip, please try again");
     }
-  }, [fetchNotifications]);
+  }, [fetchNotifications, notifications, unreadCount]);
 
+  // Note: handleNotificationAction does NOT use optimistic update.
+  // Actions like send_email / save_draft have real-world side effects,
+  // so we let the child component (EmailDraftAction) manage its own
+  // loading → success/failure state. Only after confirmed success
+  // do we refresh to sync the server status.
   const handleNotificationAction = useCallback(async (
     notificationId: string,
     actionType: string,
