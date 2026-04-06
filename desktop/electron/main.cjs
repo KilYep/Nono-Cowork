@@ -61,10 +61,29 @@ function createWindow() {
 
   // ── File system IPC handlers (for deliverable components) ──
 
+  // Normalize path: ensure Windows-style backslashes and resolve to absolute
+  function normalizePath(p) {
+    if (!p) return p;
+    // Convert forward slashes to backslashes on Windows
+    if (process.platform === 'win32') {
+      p = p.replace(/\//g, '\\');
+    }
+    // Resolve to absolute path
+    return path.resolve(p);
+  }
+
   // Open file with system default application
   ipcMain.handle('fs-open-file', async (_event, filePath) => {
     try {
-      const errMsg = await shell.openPath(filePath);
+      const normalized = normalizePath(filePath);
+
+
+      // Check if the file actually exists
+      if (!fs.existsSync(normalized)) {
+        return { success: false, error: `File not found: ${normalized}` };
+      }
+
+      const errMsg = await shell.openPath(normalized);
       if (errMsg) {
         return { success: false, error: errMsg };
       }
@@ -77,7 +96,14 @@ function createWindow() {
   // Open a folder in file manager
   ipcMain.handle('fs-open-folder', async (_event, folderPath) => {
     try {
-      const errMsg = await shell.openPath(folderPath);
+      const normalized = normalizePath(folderPath);
+
+
+      if (!fs.existsSync(normalized)) {
+        return { success: false, error: `Folder not found: ${normalized}` };
+      }
+
+      const errMsg = await shell.openPath(normalized);
       if (errMsg) {
         return { success: false, error: errMsg };
       }
@@ -90,7 +116,21 @@ function createWindow() {
   // Show file in file manager (highlight the file)
   ipcMain.handle('fs-show-in-explorer', async (_event, filePath) => {
     try {
-      shell.showItemInFolder(filePath);
+      const normalized = normalizePath(filePath);
+
+
+      // Check if the file/folder exists — showItemInFolder silently fails otherwise
+      if (!fs.existsSync(normalized)) {
+        // Try opening the parent directory if the file doesn't exist yet
+        const parentDir = path.dirname(normalized);
+        if (fs.existsSync(parentDir)) {
+          shell.showItemInFolder(parentDir);
+          return { success: true };
+        }
+        return { success: false, error: `Path not found: ${normalized}` };
+      }
+
+      shell.showItemInFolder(normalized);
       return { success: true };
     } catch (err) {
       return { success: false, error: err.message };

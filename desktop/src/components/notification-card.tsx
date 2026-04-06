@@ -309,21 +309,65 @@ export function NotificationCard({
       )}
 
       {/* ── Deliverables — type-routed rendering ── */}
+      {/* File-type cards display in a horizontal row; others stack vertically */}
       {deliverables.length > 0 && (
         <div className="px-5 pb-3 flex flex-col gap-2">
-          {deliverables.map((d, i) => (
-            <DeliverableCard
-              key={i}
-              deliverable={d}
-              isUnread={isUnread}
-              notification={notification}
-              onExecuteAction={
-                onExecuteAction
-                  ? (actionType: string) => onExecuteAction(notification.id, actionType, i)
-                  : undefined
+          {(() => {
+            const groups: { type: "file-row" | "other"; items: { d: Deliverable; i: number }[] }[] = [];
+
+            for (let i = 0; i < deliverables.length; i++) {
+              const d = deliverables[i];
+              const isFileType = d.type === "file";
+              const lastGroup = groups[groups.length - 1];
+
+              if (isFileType) {
+                if (lastGroup?.type === "file-row") {
+                  lastGroup.items.push({ d, i });
+                } else {
+                  groups.push({ type: "file-row", items: [{ d, i }] });
+                }
+              } else {
+                groups.push({ type: "other", items: [{ d, i }] });
               }
-            />
-          ))}
+            }
+
+            return groups.map((group, gi) => {
+              if (group.type === "file-row") {
+                return (
+                  <div key={`fg-${gi}`} className="flex flex-wrap gap-2">
+                    {group.items.map(({ d, i }) => (
+                      <DeliverableCard
+                        key={i}
+                        deliverable={d}
+                        isUnread={isUnread}
+                        notification={notification}
+                        onExecuteAction={
+                          onExecuteAction
+                            ? (actionType: string) => onExecuteAction(notification.id, actionType, i)
+                            : undefined
+                        }
+                      />
+                    ))}
+                  </div>
+                );
+              }
+
+              const { d, i } = group.items[0];
+              return (
+                <DeliverableCard
+                  key={i}
+                  deliverable={d}
+                  isUnread={isUnread}
+                  notification={notification}
+                  onExecuteAction={
+                    onExecuteAction
+                      ? (actionType: string) => onExecuteAction(notification.id, actionType, i)
+                      : undefined
+                  }
+                />
+              );
+            });
+          })()}
         </div>
       )}
     </div>

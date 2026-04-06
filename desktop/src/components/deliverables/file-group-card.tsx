@@ -166,6 +166,13 @@ function FileRow({
   const handleOpen = async () => {
     if (!window.electronAPI?.openFile) return;
     const localPath = syncPaths.resolve(file.path);
+
+
+    if (localPath.startsWith("/") && !localPath.match(/^[A-Z]:/i)) {
+      toast.error("Cannot resolve remote path to local. Is Syncthing running?");
+      return;
+    }
+
     const result = await window.electronAPI.openFile(localPath);
     if (!result.success) toast.error(`Cannot open: ${result.error}`);
   };
@@ -173,6 +180,13 @@ function FileRow({
   const handleFolder = async () => {
     if (!window.electronAPI?.showInExplorer) return;
     const localPath = syncPaths.resolve(file.path);
+
+
+    if (localPath.startsWith("/") && !localPath.match(/^[A-Z]:/i)) {
+      toast.error("Cannot resolve remote path to local. Is Syncthing running?");
+      return;
+    }
+
     const result = await window.electronAPI.showInExplorer(localPath);
     if (!result.success) toast.error(`Cannot open folder: ${result.error}`);
   };

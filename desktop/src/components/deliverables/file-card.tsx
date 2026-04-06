@@ -66,7 +66,14 @@ export function FileCard(props: FileCardProps) {
     }
     const rawPath = absPath || path;
     const localPath = syncPaths.resolve(rawPath);
-    console.log("[FileCard] open:", { rawPath, localPath, initialized: syncPaths.initialized });
+
+
+    // Warn if path wasn't actually resolved (still looks like a remote path)
+    if (localPath.startsWith("/") && !localPath.match(/^[A-Z]:/i)) {
+      toast.error("Cannot resolve remote path to local. Is Syncthing running?");
+      return;
+    }
+
     const result = await window.electronAPI.openFile(localPath);
     if (!result.success) {
       toast.error(`Cannot open file: ${result.error}`);
@@ -78,7 +85,16 @@ export function FileCard(props: FileCardProps) {
       toast.error("Only available in desktop app");
       return;
     }
-    const localPath = syncPaths.resolve(absPath || path);
+    const rawPath = absPath || path;
+    const localPath = syncPaths.resolve(rawPath);
+
+
+    // Warn if path wasn't actually resolved
+    if (localPath.startsWith("/") && !localPath.match(/^[A-Z]:/i)) {
+      toast.error("Cannot resolve remote path to local. Is Syncthing running?");
+      return;
+    }
+
     const result = await window.electronAPI.showInExplorer(localPath);
     if (!result.success) {
       toast.error(`Cannot open folder: ${result.error}`);
@@ -95,7 +111,10 @@ export function FileCard(props: FileCardProps) {
       onMouseLeave={() => setHovered(false)}
     >
       {/* ── Card body ── */}
-      <div className="rounded-lg rounded-tr-none border border-border/50 bg-card overflow-hidden">
+      <div
+        className="rounded-lg border border-border/50 bg-card overflow-hidden"
+        style={{ clipPath: `polygon(0 0, calc(100% - ${FOLD}px) 0, 100% ${FOLD}px, 100% 100%, 0 100%)` }}
+      >
         {/* Icon area */}
         <div className="flex items-center justify-center w-full pt-5 pb-2.5">
           <FileIcon
@@ -123,11 +142,6 @@ export function FileCard(props: FileCardProps) {
         height={FOLD + 1}
         viewBox={`0 0 ${FOLD + 1} ${FOLD + 1}`}
       >
-        {/* Background triangle — covers the card's square corner */}
-        <polygon
-          points={`0,0 ${FOLD + 1},0 ${FOLD + 1},${FOLD + 1}`}
-          className="fill-background"
-        />
         {/* Fold triangle — the "back of the paper" (darker to show depth) */}
         <polygon
           points={`0.5,1 ${FOLD},${FOLD} 0.5,${FOLD}`}
@@ -157,22 +171,26 @@ export function FileCard(props: FileCardProps) {
         />
       </svg>
 
-      {/* ── Full-card hover overlay ── */}
-      {showOverlay && (
-        <div className="absolute inset-0 z-10 flex items-center justify-center gap-2 rounded-lg rounded-tr-none bg-background/75 backdrop-blur-[6px] animate-in fade-in-0 duration-150">
+      {/* ── Full-card hover overlay (always in DOM for fade-out) ── */}
+      {action !== "deleted" && hasElectron && (
+        <div className={`absolute inset-0 z-10 flex flex-col items-center justify-center gap-0 rounded-lg rounded-tr-none transition-all duration-200 ease-in-out ${
+          showOverlay
+            ? "opacity-100 backdrop-blur-[6px] bg-background/75 pointer-events-auto"
+            : "opacity-0 backdrop-blur-0 bg-background/0 pointer-events-none"
+        }`}>
           <button
             onClick={handleOpenFile}
-            className="flex flex-col items-center gap-1 p-2 rounded-lg text-foreground/50 hover:text-foreground hover:bg-muted/50 transition-colors"
+            className="flex flex-col items-center gap-0.5 p-1.5 rounded-md text-foreground/50 hover:text-foreground hover:bg-muted/50 transition-colors"
           >
-            <ExternalLink size={18} strokeWidth={1.6} />
-            <span className="text-[8px] font-semibold uppercase tracking-wide">Open</span>
+            <ExternalLink size={20} strokeWidth={1.6} />
+            <span className="text-[7px] font-semibold uppercase tracking-wide">Open</span>
           </button>
           <button
             onClick={handleShowInExplorer}
-            className="flex flex-col items-center gap-1 p-2 rounded-lg text-foreground/50 hover:text-foreground hover:bg-muted/50 transition-colors"
+            className="flex flex-col items-center gap-0.5 p-1.5 rounded-md text-foreground/50 hover:text-foreground hover:bg-muted/50 transition-colors"
           >
-            <FolderOpen size={18} strokeWidth={1.6} />
-            <span className="text-[8px] font-semibold uppercase tracking-wide">Folder</span>
+            <FolderOpen size={20} strokeWidth={1.6} />
+            <span className="text-[7px] font-semibold uppercase tracking-wide">Folder</span>
           </button>
         </div>
       )}
