@@ -69,6 +69,10 @@ After starting, open the Web UI at http://localhost:8384.
 
 ## 3. Pair Devices
 
+> 💡 **Using the Desktop App?** You can skip this section. The desktop app automatically exchanges Device IDs with the VPS via `Settings → Save & Reconnect`. See [Desktop App Setup](desktop_setup.md#3-file-sync-automatic-pairing).
+
+### Manual pairing (without Desktop App):
+
 1. **Get your VPS Device ID**: In the VPS Web UI → top right "Actions" → "Show ID"
 
 2. **Add VPS device on your local machine**: Local Web UI → "Add Remote Device" → paste the VPS Device ID
