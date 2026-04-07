@@ -1,15 +1,17 @@
 English | [简体中文](README_zh-CN.md)
 
-# Nono CoWork
+<h1 align="center">Nono CoWork</h1>
 
-[![License](https://img.shields.io/badge/License-Apache%202.0-blue.svg)](LICENSE)
-[![Python 3.12+](https://img.shields.io/badge/Python-3.12+-3776AB.svg?logo=python&logoColor=white)](https://www.python.org/)
-[![GitHub stars](https://img.shields.io/github/stars/KilYep/nono-cowork?style=social)](https://github.com/KilYep/nono-cowork/stargazers)
-[![Last Commit](https://img.shields.io/github/last-commit/KilYep/nono-cowork)](https://github.com/KilYep/nono-cowork/commits/main)
+<p align="center">
+  <a href="LICENSE"><img src="https://img.shields.io/badge/License-Apache%202.0-blue.svg" alt="License"></a>
+  <a href="https://www.python.org/"><img src="https://img.shields.io/badge/Python-3.12+-3776AB.svg?logo=python&logoColor=white" alt="Python 3.12+"></a>
+  <a href="https://github.com/KilYep/nono-cowork/stargazers"><img src="https://img.shields.io/github/stars/KilYep/nono-cowork?style=social" alt="GitHub stars"></a>
+  <a href="https://github.com/KilYep/nono-cowork/commits/main"><img src="https://img.shields.io/github/last-commit/KilYep/nono-cowork" alt="Last Commit"></a>
+</p>
 
-### The proactive agent for real workflows — not just browser tasks.
+<h3 align="center">The proactive agent for real workflows — not just browser tasks.</h3>
 
-A background coworker that runs on your VPS, watches for events, gets work done, and syncs the results back to your local workspace.
+<p align="center">A background coworker that runs on your VPS, watches for events, gets work done,<br>and syncs the results back to your local workspace.</p>
 
 Most AI agents wait for a prompt. Nono starts when something happens.
 
@@ -21,10 +23,8 @@ Away from your computer? Nono can notify you via Telegram or Feishu too.
 
 **This isn't an assistant waiting for instructions. It's a coworker that's already at work.**
 
-<!-- Replace with demo GIF when ready -->
-
 <p align="center">
-  <img src="docs/images/desktop-home.png" alt="Nono CoWork Desktop" width="800">
+  <video src="https://github.com/user-attachments/assets/966b3346-12aa-4989-b041-d2571fd64fd5" width="800" controls autoplay loop muted></video>
 </p>
 
 ---

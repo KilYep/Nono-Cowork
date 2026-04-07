@@ -1,15 +1,17 @@
 [English](README.md) | 简体中文
 
-# Nono CoWork
+<h1 align="center">Nono CoWork</h1>
 
-[![License](https://img.shields.io/badge/License-Apache%202.0-blue.svg)](LICENSE)
-[![Python 3.12+](https://img.shields.io/badge/Python-3.12+-3776AB.svg?logo=python&logoColor=white)](https://www.python.org/)
-[![GitHub stars](https://img.shields.io/github/stars/KilYep/nono-cowork?style=social)](https://github.com/KilYep/nono-cowork/stargazers)
-[![Last Commit](https://img.shields.io/github/last-commit/KilYep/nono-cowork)](https://github.com/KilYep/nono-cowork/commits/main)
+<p align="center">
+  <a href="LICENSE"><img src="https://img.shields.io/badge/License-Apache%202.0-blue.svg" alt="License"></a>
+  <a href="https://www.python.org/"><img src="https://img.shields.io/badge/Python-3.12+-3776AB.svg?logo=python&logoColor=white" alt="Python 3.12+"></a>
+  <a href="https://github.com/KilYep/nono-cowork/stargazers"><img src="https://img.shields.io/github/stars/KilYep/nono-cowork?style=social" alt="GitHub stars"></a>
+  <a href="https://github.com/KilYep/nono-cowork/commits/main"><img src="https://img.shields.io/github/last-commit/KilYep/nono-cowork" alt="Last Commit"></a>
+</p>
 
-### 为真实工作流而生的主动 Agent — 不只是浏览器任务。
+<h3 align="center">为真实工作流而生的主动 Agent — 不只是浏览器任务。</h3>
 
-一个运行在你 VPS 上的后台同事：监听事件、推进工作、把结果同步回你的本地工作区。
+<p align="center">一个运行在你 VPS 上的后台同事：监听事件、推进工作、把结果同步回你的本地工作区。</p>
 
 大多数 Agent 还在等你发指令。Nono 在事情发生时就开始工作。
 
@@ -21,10 +23,8 @@
 
 **这不是一个等你开口的助手，而是一个已经在干活的同事。**
 
-<!-- 做好 Demo GIF 之后替换 -->
-
 <p align="center">
-  <img src="docs/images/desktop-home.png" alt="Nono CoWork 桌面端" width="800">
+  <video src="https://github.com/user-attachments/assets/966b3346-12aa-4989-b041-d2571fd64fd5" width="800" controls autoplay loop muted></video>
 </p>
 
 ---
