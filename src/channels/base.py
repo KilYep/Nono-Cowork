@@ -248,6 +248,12 @@ class Channel(ABC):
 
     name: str = "unknown"  # Override in subclass
 
+    # Owner's native ID on this channel (e.g., Feishu open_id, Telegram chat_id).
+    # Used by notification _distribute() to send messages to the correct IM target.
+    # Subclasses should set this from env vars. If empty, notifications to this
+    # channel will fall back to OWNER_USER_ID (which may fail for non-Desktop channels).
+    owner_native_id: str = ""
+
     @abstractmethod
     def start(self):
         """Start the channel and begin listening for messages."""
@@ -325,6 +331,7 @@ class Channel(ABC):
         thread = threading.Thread(
             target=run_agent_for_message,
             args=(session_id, user_text, reply_func, status_func, self.name),
+            kwargs={"channel_user_id": raw_user_id},
             daemon=True,
         )
         thread.start()

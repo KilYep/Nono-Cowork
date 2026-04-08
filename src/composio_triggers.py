@@ -502,7 +502,7 @@ def create_trigger(trigger_slug: str, agent_prompt: str = None,
             # (must match the connected account on Composio)
             "composio_user_id": COMPOSIO_USER_ID,
             # channel_user_id: IM-specific delivery target (e.g., feishu ou_xxx, telegram chat_id)
-            "channel_user_id": ctx.get("user_id", ""),
+            "channel_user_id": ctx.get("channel_user_id", ctx.get("user_id", "")),
             "channel_name": ctx.get("channel_name", ""),
             "created_at": time.strftime("%Y-%m-%dT%H:%M:%S"),
         }

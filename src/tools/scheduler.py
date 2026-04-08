@@ -19,6 +19,19 @@ def _require_context():
     return ctx, None
 
 
+def _channel_user_id(ctx: dict) -> str:
+    """Resolve channel-native user ID from execution context."""
+    return ctx.get("channel_user_id") or ctx.get("user_id", "")
+
+
+def _task_owned_by_ctx(task: dict, ctx: dict) -> bool:
+    """Check ownership with backward compatibility for old single-owner tasks."""
+    task_user = task.get("channel_user_id", task.get("user_id"))
+    current_channel_user = _channel_user_id(ctx)
+    current_session_user = ctx.get("user_id")
+    return task_user in {current_channel_user, current_session_user}
+
+
 # ── Tools ──
 
 @tool(
@@ -75,7 +88,7 @@ def create_scheduled_task(task_name: str, cron: str, task_prompt: str,
             task_name=task_name,
             cron=cron,
             task_prompt=task_prompt,
-            channel_user_id=ctx["user_id"],
+            channel_user_id=_channel_user_id(ctx),
             channel_name=ctx["channel_name"],
             tool_access=tool_access,
         )
@@ -161,7 +174,7 @@ def delete_scheduled_task(task_id: str) -> str:
     task = get_task(task_id)
     if not task:
         return f"❌ Task '{task_id}' not found."
-    if task.get("channel_user_id", task.get("user_id")) != ctx["user_id"]:
+    if not _task_owned_by_ctx(task, ctx):
         return f"❌ Task '{task_id}' does not belong to you."
 
     scheduler.remove_task(task_id)
@@ -220,7 +233,7 @@ def update_scheduled_task(task_id: str, cron: str = None,
     task = get_task(task_id)
     if not task:
         return f"❌ Task '{task_id}' not found."
-    if task.get("channel_user_id", task.get("user_id")) != ctx["user_id"]:
+    if not _task_owned_by_ctx(task, ctx):
         return f"❌ Task '{task_id}' does not belong to you."
 
     # Build updates

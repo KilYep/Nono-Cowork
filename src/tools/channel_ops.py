@@ -43,7 +43,7 @@ def send_file(path: str, caption: str = "") -> str:
         return "❌ Cannot send file: no channel context (this tool only works during IM conversations)."
 
     channel_name = ctx["channel_name"]
-    user_id = ctx["user_id"]
+    user_id = ctx.get("channel_user_id") or ctx["user_id"]
 
     # Get channel instance
     channel = get_channel(channel_name)

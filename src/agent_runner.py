@@ -14,14 +14,16 @@ logger = logging.getLogger("agent_runner")
 def run_agent_for_message(user_id: str, user_text: str,
                           reply_func, status_func=None,
                           channel_name: str = "unknown",
-                          on_event_hook=None):
+                          on_event_hook=None,
+                          channel_user_id: str | None = None):
     """
     Run Agent in the calling thread and reply via callback functions.
 
     All IM channels share this function, passing in different reply_func callbacks.
 
     Args:
-        user_id: Unique user identifier
+        user_id: Session user identifier
+        channel_user_id: Native channel recipient ID (open_id/chat_id)
         user_text: User message text
         reply_func: Callback function to send the result: reply_func(text)
         status_func: Optional callback for status updates: status_func(text)
@@ -39,12 +41,14 @@ def run_agent_for_message(user_id: str, user_text: str,
         return
 
     # Set execution context so tools can access user_id, channel_name, and callbacks
+    channel_user_id = channel_user_id or user_id
     set_context(user_id=user_id, channel_name=channel_name,
                 check_stop=lambda: sessions.is_stopped(user_id),
                 status_func=status_func,
                 subagent_check_stop=lambda: (
                     sessions.is_subagent_stopped(user_id) or sessions.is_stopped(user_id)
-                ))
+                ),
+                channel_user_id=channel_user_id)
 
     # Clear any previous stop flag before starting
     sessions.clear_stop(user_id)

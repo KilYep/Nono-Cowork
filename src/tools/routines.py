@@ -47,6 +47,11 @@ def _require_context():
     return ctx, None
 
 
+def _channel_user_id(ctx: dict) -> str:
+    """Resolve channel-native user ID from execution context."""
+    return ctx.get("channel_user_id") or ctx.get("user_id", "")
+
+
 # ─────────────────────────────────────────────
 # Tool 1: list_routines
 # ─────────────────────────────────────────────
@@ -83,6 +88,7 @@ def list_routines() -> str:
                 f"  Cron:     {t['cron']}\n"
                 f"  Status:   {status}\n"
                 f"  Model:    {t.get('model') or '(system default)'}\n"
+                f"  Notify:   {', '.join(t.get('notify_channels') or []) or '(desktop only)'}\n"
                 f"  Prompt:   {t['task_prompt'][:150]}{'...' if len(t['task_prompt']) > 150 else ''}\n"
                 f"  Next run: {next_run or 'N/A'}\n"
                 f"  Last run: {t.get('last_run_at') or 'Never'}\n"
@@ -252,6 +258,16 @@ def list_routines() -> str:
                 ),
                 "enum": ["read_only", "read_write", "safe", "full"],
             },
+            "notify_channels": {
+                "type": "array",
+                "items": {"type": "string", "enum": ["feishu", "telegram"]},
+                "description": (
+                    "Channels to push task results to as notifications. "
+                    "By default, results only appear in Desktop notifications. "
+                    "Add 'feishu' and/or 'telegram' to also push a summary to those IM apps. "
+                    "Example: ['feishu'] to get notified on Feishu when the task completes."
+                ),
+            },
         },
         "required": ["type", "name", "prompt"],
     },
@@ -260,14 +276,16 @@ def create_routine(type: str, name: str, prompt: str,
                    cron: str = None, trigger_slug: str = None,
                    trigger_config: dict = None, path_pattern: str = None,
                    file_actions: list[str] = None, model: str = "",
-                   tool_access: str = "full") -> str:
+                   tool_access: str = "full",
+                   notify_channels: list[str] = None) -> str:
     """Create a new routine."""
     ctx, err = _require_context()
     if err:
         return err
 
     if type == "cron":
-        return _create_cron_routine(name, prompt, cron, model, tool_access, ctx)
+        return _create_cron_routine(name, prompt, cron, model, tool_access, ctx,
+                                    notify_channels=notify_channels)
     elif type == "trigger":
         return _create_trigger_routine(name, prompt, trigger_slug, trigger_config,
                                        model, tool_access, ctx)
@@ -278,7 +296,8 @@ def create_routine(type: str, name: str, prompt: str,
         return f"❌ Unknown routine type: '{type}'. Use 'cron', 'trigger', or 'file_drop'."
 
 
-def _create_cron_routine(name, prompt, cron, model, tool_access, ctx) -> str:
+def _create_cron_routine(name, prompt, cron, model, tool_access, ctx,
+                         notify_channels=None) -> str:
     """Create a cron-based routine."""
     if not cron:
         return "❌ Missing `cron` parameter for cron routine."
@@ -291,20 +310,23 @@ def _create_cron_routine(name, prompt, cron, model, tool_access, ctx) -> str:
             task_name=name,
             cron=cron,
             task_prompt=prompt,
-            channel_user_id=ctx["user_id"],
+            channel_user_id=_channel_user_id(ctx),
             channel_name=ctx["channel_name"],
             tool_access=tool_access,
             model=model,
+            notify_channels=notify_channels,
         )
         scheduler.add_task(task)
 
         next_run = scheduler.get_next_run(task["id"])
+        notify_str = ', '.join(notify_channels) if notify_channels else '(desktop only)'
         return (
             f"✅ Cron routine created!\n"
             f"  ID:       {task['id']}\n"
             f"  Name:     {name}\n"
             f"  Cron:     {cron}\n"
             f"  Model:    {model or '(system default)'}\n"
+            f"  Notify:   {notify_str}\n"
             f"  Next run: {next_run or 'calculating...'}"
         )
     except ValueError as e:
@@ -360,7 +382,7 @@ def _create_file_drop_routine(name, prompt, path_pattern, file_actions,
         name=name,
         path_pattern=path_pattern,
         agent_prompt=prompt,
-        channel_user_id=ctx["user_id"],
+        channel_user_id=_channel_user_id(ctx),
         channel_name=ctx["channel_name"],
         model=model,
         tool_access=tool_access,
@@ -420,13 +442,23 @@ def _create_file_drop_routine(name, prompt, path_pattern, file_actions,
                 "type": "boolean",
                 "description": "Enable/disable (cron only; for triggers use manage_routine toggle).",
             },
+            "notify_channels": {
+                "type": "array",
+                "items": {"type": "string", "enum": ["feishu", "telegram"]},
+                "description": (
+                    "Update which channels receive result notifications. "
+                    "Set to ['feishu'] or ['feishu', 'telegram']. "
+                    "Set to [] (empty array) to disable IM notifications (desktop only)."
+                ),
+            },
         },
         "required": ["id"],
     },
 )
 def update_routine(id: str, name: str = None, cron: str = None,
                    prompt: str = None, model: str = None,
-                   enabled: bool = None) -> str:
+                   enabled: bool = None,
+                   notify_channels: list[str] = None) -> str:
     """Update an existing routine by ID."""
     rtype = _detect_routine_type(id)
     if rtype == "trigger":
@@ -434,10 +466,12 @@ def update_routine(id: str, name: str = None, cron: str = None,
     elif rtype == "file_drop":
         return _update_file_drop_routine(id, name, prompt, model, enabled)
     else:
-        return _update_cron_routine(id, name, cron, prompt, model, enabled)
+        return _update_cron_routine(id, name, cron, prompt, model, enabled,
+                                    notify_channels=notify_channels)
 
 
-def _update_cron_routine(id, name, cron, prompt, model, enabled) -> str:
+def _update_cron_routine(id, name, cron, prompt, model, enabled,
+                         notify_channels=None) -> str:
     """Update a cron routine."""
     from scheduler.store import get_task, update_task
     from scheduler.engine import scheduler
@@ -457,6 +491,9 @@ def _update_cron_routine(id, name, cron, prompt, model, enabled) -> str:
         updates["model"] = model
     if enabled is not None:
         updates["enabled"] = enabled
+    if notify_channels is not None:
+        # Allow empty list to clear, or list of channel names
+        updates["notify_channels"] = notify_channels if notify_channels else None
 
     if not updates:
         return "No changes specified."
@@ -482,6 +519,9 @@ def _update_cron_routine(id, name, cron, prompt, model, enabled) -> str:
             parts.append(f"  Model:  {model or '(system default)'}")
         if enabled is not None:
             parts.append(f"  Status: {'✅ Enabled' if enabled else '⏸️ Paused'}")
+        if notify_channels is not None:
+            nc_str = ', '.join(notify_channels) if notify_channels else '(desktop only)'
+            parts.append(f"  Notify: {nc_str}")
         return "\n".join(parts)
 
     except ValueError as e:

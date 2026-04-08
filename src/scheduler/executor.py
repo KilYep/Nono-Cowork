@@ -42,6 +42,8 @@ def _run_task(task: dict):
     # channel_user_id: IM-specific target (feishu ou_xxx, telegram chat_id)
     channel_user_id = task.get("channel_user_id", task.get("user_id", ""))
     channel_name = task["channel_name"]
+    # notify_channels: extra channels to push results to (e.g. ["feishu", "telegram"])
+    notify_channels = task.get("notify_channels") or None
 
     # For notification routing, use OWNER_USER_ID (single-owner system)
     from config import OWNER_USER_ID
@@ -143,19 +145,25 @@ def _run_task(task: dict):
 
         duration = time.time() - start_time
 
-        # Store via NotificationStore
-        serialized = _serialize_history(updated_history)
-        _store_notification(
-            task_id=task_id,
-            task_name=task_name,
-            user_id=notify_user_id,
-            body=final_reply,
-            history=serialized,
-            token_stats=dict(updated_stats),
-            system_prompt=system_prompt,
-            duration=duration,
-            channel_name=channel_name,
-        )
+        # Store via NotificationStore (unless agent output [SKIP] — silent mode)
+        # [SKIP] allows "notify only if something noteworthy" patterns in prompts
+        if "[SKIP]" in final_reply:
+            logger.info("Task %s output [SKIP], skipping notification", task_id)
+        else:
+            serialized = _serialize_history(updated_history)
+            _store_notification(
+                task_id=task_id,
+                task_name=task_name,
+                user_id=notify_user_id,
+                body=final_reply,
+                history=serialized,
+                token_stats=dict(updated_stats),
+                system_prompt=system_prompt,
+                duration=duration,
+                channel_name=channel_name,
+                channel_user_id=channel_user_id,
+                deliver_to=notify_channels,
+            )
 
         # Update task record
         update_task(
@@ -202,6 +210,8 @@ def _store_notification(
     system_prompt: str,
     duration: float,
     channel_name: str,
+    channel_user_id: str,
+    deliver_to: list[str] = None,
 ):
     """Store scheduled task result via NotificationStore."""
     try:
@@ -217,6 +227,7 @@ def _store_notification(
             agent_provider="self",
             agent_duration_s=duration,
             system_prompt=system_prompt,
+            deliver_to=deliver_to,
         )
     except Exception as e:
         logger.error("Failed to store notification for task %s: %s", task_id, e)
@@ -231,7 +242,7 @@ def _store_notification(
                         break
             if channel:
                 header = f"📋 Scheduled Task 「{task_name}」 Result:\n\n"
-                channel.send_reply(channel_user_id, header + body)
+                native_id = getattr(channel, 'owner_native_id', None) or channel_user_id
+                channel.send_reply(native_id, header + body)
         except Exception as e2:
             logger.error("Fallback delivery also failed: %s", e2)
-
