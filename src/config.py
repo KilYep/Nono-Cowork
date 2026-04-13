@@ -19,8 +19,9 @@ MODEL_POOL = [
     "openai/gpt-5.1",
     "moonshotai/kimi-k2",
     "deepseek/deepseek-chat",
+    "openrouter/minimax/minimax-m2.7"
 ]
-MODEL = os.getenv("MODEL", "dashscope/qwen3.5-plus")
+MODEL = os.getenv("MODEL", "openrouter/minimax/minimax-m2.7")
 API_BASE = os.getenv("API_BASE", "").strip()   # Custom OpenAI-compatible endpoint
 API_KEY = os.getenv("API_KEY", "").strip()      # API key for the custom endpoint
 

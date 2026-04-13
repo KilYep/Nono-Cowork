@@ -117,6 +117,7 @@ type AvailableModels = string[];
 
 type MessagePart =
   | { type: "text"; content: string }
+  | { type: "reasoning"; content: string }
   | { type: "tool_call"; toolName?: string; args?: Record<string, unknown>; round: number }
   | { type: "tool_result"; toolName?: string; result?: string; round: number };
 
@@ -155,12 +156,17 @@ function convertHistoryToMessages(backendMessages: any[]): { messages: ChatMessa
     } else if (msg.role === "assistant") {
       const parts: MessagePart[] = [];
 
-      // 1. Text content → text part
+      // 1. Reasoning content → reasoning part (before text/tools)
+      if (msg.reasoning_content) {
+        parts.push({ type: "reasoning", content: msg.reasoning_content });
+      }
+
+      // 2. Text content → text part
       if (msg.content) {
         parts.push({ type: "text", content: msg.content });
       }
 
-      // 2. Tool calls → tool_call parts + matched tool_result parts
+      // 3. Tool calls → tool_call parts + matched tool_result parts
       if (msg.tool_calls && Array.isArray(msg.tool_calls)) {
         for (const tc of msg.tool_calls) {
           const fn = tc.function || {};
@@ -272,6 +278,25 @@ function PartsRenderer({
 
   while (i < parts.length) {
     const part = parts[i];
+
+    if (part.type === "reasoning") {
+      // Check if this reasoning block is the last part and still streaming
+      const isLastPart = i === parts.length - 1;
+      const isReasoningStreaming = isLastPart && isActive;
+      items.push(
+        <Reasoning
+          key={`reasoning-${i}`}
+          isStreaming={isReasoningStreaming}
+          className="w-full"
+          defaultOpen={isReasoningStreaming ? undefined : false}
+        >
+          <ReasoningTrigger />
+          <ReasoningContent>{part.content}</ReasoningContent>
+        </Reasoning>
+      );
+      i++;
+      continue;
+    }
 
     if (part.type === "text") {
       items.push(
@@ -754,7 +779,6 @@ function App() {
     const assistantId = nextId();
     const currentParts: MessagePart[] = [];
     let assistantContent = "";
-    let currentReasoning = "";
 
     const updateMsg = (patch: Partial<ChatMessage>) => {
       setMessages((prev) => {
@@ -770,7 +794,6 @@ function App() {
             id: assistantId,
             role: "assistant" as const,
             content: assistantContent,
-            reasoning: currentReasoning,
             parts: [...currentParts],
             ...patch,
           },
@@ -820,9 +843,14 @@ function App() {
                 // (thinkingMsgId stays set after thought events, blocking status visibility)
                 setThinkingMsgId(null);
               } else if (eventType === "reasoning_chunk") {
-                currentReasoning += (data.content || "");
+                const lastPart = currentParts[currentParts.length - 1];
+                if (lastPart && lastPart.type === "reasoning") {
+                  lastPart.content += (data.content || "");
+                } else {
+                  currentParts.push({ type: "reasoning", content: data.content || "" });
+                }
                 setThinkingMsgId(assistantId);
-                updateMsg({ reasoning: currentReasoning });
+                updateMsg({ parts: [...currentParts] });
               } else if (eventType === "text_chunk") {
                 // Append to last text part, or create new one
                 const lastPart = currentParts[currentParts.length - 1];
@@ -1209,7 +1237,7 @@ function App() {
                             <MessageContent>
                               {msg.role === "assistant" ? (
                                 <>
-                                  {msg.reasoning && (
+                                  {msg.reasoning && (!msg.parts || !msg.parts.some(p => p.type === "reasoning")) && (
                                     <Reasoning
                                       isStreaming={msg.id === thinkingMsgId && !msg.content}
                                       className="w-full"

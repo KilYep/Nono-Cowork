@@ -42,3 +42,6 @@ temp_work_gitignore/
 
 # web
 website/
+
+# excalidraw
+*.excalidraw
