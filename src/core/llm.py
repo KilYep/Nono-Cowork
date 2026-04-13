@@ -39,6 +39,7 @@ def inject_cache_control(messages: list, model: str) -> list:
 def _build_llm_kwargs(messages: list, model: str = None, tools: list = None) -> dict:
     """Build shared kwargs for LiteLLM calls (used by both stream and non-stream)."""
     model = model or MODEL
+    _has_provider_prefix = "/" in model
 
     kwargs = {
         "model": model,
@@ -50,7 +51,7 @@ def _build_llm_kwargs(messages: list, model: str = None, tools: list = None) -> 
         kwargs["tool_choice"] = "auto"
 
     # Determine provider prefix (e.g. "gemini", "anthropic", "deepseek")
-    _provider = model.split("/")[0] if "/" in model else ""
+    _provider = model.split("/", 1)[0] if _has_provider_prefix else ""
 
     # Enable thinking/reasoning for models that support it
     # LiteLLM maps reasoning_effort to Gemini's thinking_level automatically
@@ -59,11 +60,16 @@ def _build_llm_kwargs(messages: list, model: str = None, tools: list = None) -> 
     if _provider in _THINKING_PROVIDERS:
         kwargs["reasoning_effort"] = "medium"  # "low" or "high"; Gemini 3 can't fully disable
 
-    # Only pass custom API_BASE/API_KEY for models that use the custom endpoint.
-    # Providers with their own env vars (GEMINI_API_KEY, ANTHROPIC_API_KEY, etc.)
-    # should NOT use the custom endpoint — litellm resolves them automatically.
-    _SELF_AUTH_PROVIDERS = {"gemini", "anthropic", "deepseek"}
-    _use_custom_endpoint = API_BASE and _provider not in _SELF_AUTH_PROVIDERS
+    # Only pass custom API_BASE/API_KEY for OpenAI-compatible mode.
+    # Restrict this to:
+    #   1) model without provider prefix (e.g. "qwen3.5-plus")
+    #   2) explicit openai-compatible provider prefix
+    # This prevents provider-routed models (e.g. openrouter/*, gemini/*)
+    # from being accidentally sent to API_BASE.
+    _OPENAI_COMPAT_PROVIDERS = {"openai", "text-completion-openai"}
+    _use_custom_endpoint = bool(API_BASE) and (
+        (not _has_provider_prefix) or (_provider in _OPENAI_COMPAT_PROVIDERS)
+    )
     if _use_custom_endpoint:
         kwargs["api_base"] = API_BASE
     if _use_custom_endpoint and API_KEY:
