@@ -113,7 +113,7 @@ import {
   ModelSelectorLogo,
   ModelSelectorName,
 } from "@/components/ai-elements/model-selector";
-import { PanelLeft, ChevronDown, Square } from "lucide-react";
+import { PanelLeft, ChevronDown, Square, AlertCircle, RotateCcw } from "lucide-react";
 import { Button } from "@/components/ui/button";
 
 // Map litellm provider names → ModelSelectorLogo provider names
@@ -160,6 +160,10 @@ interface ChatMessage {
   content: string;
   reasoning?: string;
   parts?: MessagePart[];
+  // Marks assistant messages that carry a backend/connection error so the
+  // UI can render them distinctly (red banner + retry) instead of looking
+  // like a normal reply.
+  isError?: boolean;
 }
 
 // ── History Converter ──
@@ -849,14 +853,16 @@ function App() {
   }, [fetchNotifications]);
 
   // Send message — called by PromptInput onSubmit with { text, files }
-  const handleSubmit = useCallback(async () => {
-    const text = inputRef.current.trim();
+  const handleSubmit = useCallback(async (overrideText?: string) => {
+    const text = (overrideText ?? inputRef.current).trim();
     if (!text || isStreaming) return;
 
     // Add user message
     const userMsg: ChatMessage = { id: nextId(), role: "user", content: text };
     setMessages((prev) => [...prev, userMsg]);
-    setInput("");
+    if (overrideText === undefined) {
+      setInput("");
+    }
     setIsStreaming(true);
     setStatusText("Thinking...");
 
@@ -959,10 +965,18 @@ function App() {
                 setThinkingMsgId(assistantId);
                 updateMsg({ parts: [...currentParts] });
               } else if (eventType === "reply") {
-                // Fallback: only use reply if no text_chunk was received
-                // (reply may only contain the last round's text)
-                if (!assistantContent) {
-                  assistantContent = data.text;
+                // Backend signals agent-layer failures with a "❌" prefix
+                // (e.g. "❌ Execution error: LLM stream went silent…").
+                // Render those as an error banner rather than a plain reply.
+                const replyText: string = data.text ?? "";
+                const looksLikeError = replyText.startsWith("❌");
+                if (looksLikeError) {
+                  assistantContent = replyText;
+                  updateMsg({ content: assistantContent, isError: true });
+                } else if (!assistantContent) {
+                  // Fallback: only use reply if no text_chunk was received
+                  // (reply may only contain the last round's text)
+                  assistantContent = replyText;
                   setAnimatingMsgId(assistantId);
                   updateMsg({ content: assistantContent });
                 }
@@ -976,13 +990,14 @@ function App() {
         }
       }
     } catch (err) {
-      // Show error as assistant message
+      // Show error as assistant message (rendered as red banner + retry)
       setMessages((prev) => [
         ...prev,
         {
           id: assistantId,
           role: "assistant",
           content: `❌ Connection error: ${err instanceof Error ? err.message : "Unknown error"}`,
+          isError: true,
         },
       ]);
     } finally {
@@ -1001,6 +1016,23 @@ function App() {
   const handlePromptSubmit = useCallback(async () => {
     await handleSubmit();
   }, [handleSubmit]);
+
+  // Retry: find the user message immediately preceding the clicked error
+  // message and resubmit its text. Backend history already contains the
+  // original user turn, so resending produces a duplicate user turn — the
+  // LLM handles this fine, and the duplicate is visible in the UI which is
+  // honest behavior.
+  const handleRetryError = useCallback((errorMsgId: string) => {
+    if (isStreaming) return;
+    const idx = messages.findIndex((m) => m.id === errorMsgId);
+    if (idx <= 0) return;
+    for (let i = idx - 1; i >= 0; i--) {
+      if (messages[i].role === "user" && messages[i].content) {
+        void handleSubmit(messages[i].content);
+        return;
+      }
+    }
+  }, [isStreaming, messages, handleSubmit]);
 
   return (
     <>
@@ -1327,7 +1359,28 @@ function App() {
                         output.push(
                           <Message key={msg.id} from={msg.role}>
                             <MessageContent>
-                              {msg.role === "assistant" ? (
+                              {msg.role === "assistant" && msg.isError ? (
+                                <div className="flex items-start gap-3 rounded-lg border border-destructive/40 bg-destructive/5 px-4 py-3 text-sm">
+                                  <AlertCircle className="mt-0.5 h-4 w-4 shrink-0 text-destructive" />
+                                  <div className="flex min-w-0 flex-1 flex-col gap-2">
+                                    <p className="whitespace-pre-wrap break-words text-foreground">
+                                      {msg.content.replace(/^❌\s*/, "")}
+                                    </p>
+                                    <div>
+                                      <Button
+                                        variant="outline"
+                                        size="sm"
+                                        onClick={() => handleRetryError(msg.id)}
+                                        disabled={isStreaming}
+                                        className="h-7 gap-1.5 text-xs"
+                                      >
+                                        <RotateCcw className="h-3 w-3" />
+                                        Retry
+                                      </Button>
+                                    </div>
+                                  </div>
+                                </div>
+                              ) : msg.role === "assistant" ? (
                                 <>
                                   {msg.reasoning && (!msg.parts || !msg.parts.some(p => p.type === "reasoning")) && (
                                     <Reasoning

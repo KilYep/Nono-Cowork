@@ -11,6 +11,8 @@ The loop follows a simple cycle each round:
 import inspect
 import re
 import json
+import queue
+import threading
 from tools import tools_map, tools_schema
 from tools import composio_tools
 from tools.file_ops import IMAGE_MARKER_PREFIX
@@ -85,8 +87,12 @@ def _fmt_tool_args(args: dict, max_val_len: int = 80) -> str:
     return "\n".join(parts)
 
 
-def _print_tool_call(tool_name: str, args: dict):
-    print(f"\033[36m  🔧 {tool_name}\033[0m")
+def _print_tool_call(tool_name: str, args: dict, description: str = ""):
+    if description:
+        print(f"\033[36m  🔧 {description}\033[0m")
+        print(f"\033[90m    → {tool_name}\033[0m")
+    else:
+        print(f"\033[36m  🔧 {tool_name}\033[0m")
     if args:
         print(f"\033[90m{_fmt_tool_args(args)}\033[0m")
     print()
@@ -163,11 +169,51 @@ def _stream_llm_response(history, active_model, active_tools, check_stop, on_eve
     usage = None
     stopped = False
 
-    for chunk in stream:
+    # Wrap stream iteration in a background thread so we can watchdog for
+    # mid-stream silence and poll the stop flag without being blocked on the
+    # underlying socket read. Some providers go quiet mid-stream without
+    # closing the connection; without this, the agent hangs forever.
+    import time as _time
+    IDLE_TIMEOUT = 90  # seconds of mid-stream silence before we give up
+    chunk_q: queue.Queue = queue.Queue()
+    _SENTINEL_DONE = object()
+
+    def _drain_stream():
+        try:
+            for c in stream:
+                chunk_q.put(c)
+        except Exception as exc:
+            chunk_q.put(("__error__", exc))
+        finally:
+            chunk_q.put(_SENTINEL_DONE)
+
+    drain_thread = threading.Thread(target=_drain_stream, daemon=True)
+    drain_thread.start()
+
+    last_chunk_at = _time.monotonic()
+    stream_stalled = False
+
+    while True:
         if check_stop and check_stop():
             print("\n🛑 Stop requested — aborting LLM stream")
             stopped = True
             break
+
+        try:
+            chunk = chunk_q.get(timeout=1.0)
+        except queue.Empty:
+            if _time.monotonic() - last_chunk_at > IDLE_TIMEOUT:
+                print(f"\n⚠️  LLM stream idle for >{IDLE_TIMEOUT}s — aborting")
+                stream_stalled = True
+                break
+            continue
+
+        last_chunk_at = _time.monotonic()
+
+        if chunk is _SENTINEL_DONE:
+            break
+        if isinstance(chunk, tuple) and len(chunk) == 2 and chunk[0] == "__error__":
+            raise chunk[1]
 
         delta = chunk.choices[0].delta if chunk.choices else None
         chunk_usage = getattr(chunk, "usage", None)
@@ -214,6 +260,21 @@ def _stream_llm_response(history, active_model, active_tools, check_stop, on_eve
 
     if accumulated_reasoning:
         print()
+
+    # Best-effort close the upstream stream so we release the socket.
+    if stopped or stream_stalled:
+        try:
+            close_fn = getattr(stream, "close", None)
+            if close_fn:
+                close_fn()
+        except Exception:
+            pass
+
+    if stream_stalled:
+        raise TimeoutError(
+            f"LLM stream went silent for more than {IDLE_TIMEOUT}s "
+            "(provider stall — try again or switch model)"
+        )
 
     # Reconstruct LiteLLM message object
     tool_calls_list = None
@@ -440,10 +501,14 @@ def agent_loop(history: list[dict], log_file=None, token_stats: dict = None,
 
                 tool_name = tc.function.name
                 args = json.loads(tc.function.arguments)
-                _print_tool_call(tool_name, args)
+
+                # Extract LLM-provided description (human-readable intent)
+                tool_description = args.pop("description", "") or ""
+
+                _print_tool_call(tool_name, args, tool_description)
 
                 if on_event:
-                    on_event({"type": "tool_call", "tool_name": tool_name, "args": args, "round": round_num})
+                    on_event({"type": "tool_call", "tool_name": tool_name, "args": args, "description": tool_description, "round": round_num})
 
                 tool_result = _dispatch_tool(tool_name, args)
                 display_result = _process_tool_result(tool_name, tool_result, tc.id, history)

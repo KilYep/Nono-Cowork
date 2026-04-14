@@ -111,6 +111,7 @@ class DesktopChannel(Channel):
                     "type": "tool_call",
                     "tool_name": evt.get("tool_name", ""),
                     "args": evt.get("args", {}),
+                    "description": evt.get("description", ""),
                     "round": evt.get("round"),
                 })
             elif evt_type == "tool_result":
@@ -320,8 +321,21 @@ async def list_sessions():
 
 @app.post("/api/sessions")
 async def create_session():
-    """Archive the current session and start a new one."""
-    sessions.reset(DESKTOP_USER_ID)
+    """Archive the current session and start a new one.
+
+    Refuses if an agent is still running — otherwise reset() would close
+    the log file out from under the running thread and crash it.
+    """
+    lock = sessions.get_lock(DESKTOP_USER_ID)
+    if not lock.acquire(blocking=False):
+        return JSONResponse(
+            {"error": "Agent is currently running. Stop it and wait for it to finish before starting a new session."},
+            status_code=409,
+        )
+    try:
+        sessions.reset(DESKTOP_USER_ID)
+    finally:
+        lock.release()
     new_status = sessions.get_status(DESKTOP_USER_ID)
     return {
         "session_id": new_status["session_id"] if new_status else None,

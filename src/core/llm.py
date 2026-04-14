@@ -96,6 +96,9 @@ def call_llm_stream(messages: list, model: str = None, tools: list = None):
     kwargs = _build_llm_kwargs(messages, model, tools)
     kwargs["stream"] = True
     kwargs["stream_options"] = {"include_usage": True}  # Get usage in final chunk
+    # Overall request timeout — caps TTFB + socket read stalls at the HTTP layer.
+    # The per-chunk idle watchdog in _stream_llm_response handles mid-stream silence.
+    kwargs["timeout"] = 300
     return litellm.completion(**kwargs)
 
 

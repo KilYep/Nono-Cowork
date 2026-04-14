@@ -48,12 +48,21 @@ def create_log_file():
 
 
 def log_event(log_file, event: dict):
-    """Write a log event (flushed immediately for crash safety)."""
-    if log_file is None:
+    """Write a log event (flushed immediately for crash safety).
+
+    Silently no-ops if the file has already been closed (e.g. a zombie
+    agent thread whose session got reset mid-run) — crashing here would
+    take down the whole channel thread.
+    """
+    if log_file is None or getattr(log_file, "closed", False):
         return
     event["timestamp"] = time.strftime("%Y-%m-%d %H:%M:%S")
-    log_file.write(json.dumps(event, ensure_ascii=False) + "\n")
-    log_file.flush()
+    try:
+        log_file.write(json.dumps(event, ensure_ascii=False) + "\n")
+        log_file.flush()
+    except ValueError:
+        # File was closed between the check above and the write (race).
+        pass
 
 
 def close_log_file(log_file):
