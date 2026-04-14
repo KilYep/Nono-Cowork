@@ -19,13 +19,13 @@ After=network.target
 
 [Service]
 Type=simple
-User=google-server
-WorkingDirectory=/home/google-server/hands_on_agent/src
-ExecStart=/home/google-server/hands_on_agent/.venv/bin/python main.py
+User=root
+WorkingDirectory=/root/Nono-Cowork
+ExecStart=/root/.local/bin/uv run desktop-agent
 Restart=always
 RestartSec=5
 Environment=PYTHONUNBUFFERED=1
-Environment=HOME=/home/google-server
+Environment=HOME=/root
 
 [Install]
 WantedBy=multi-user.target
