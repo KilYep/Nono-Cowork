@@ -36,15 +36,37 @@ _tools_tags: dict[str, list[str]] = {}  # tool_name → tags
 
 
 def tool(name: str, description: str, parameters: dict, tags: list[str] = None):
-    """Decorator to register an agent tool with its JSON schema and optional tags."""
+    """Decorator to register an agent tool with its JSON schema and optional tags.
+
+    Every tool automatically gets a 'description' property injected into its
+    parameters schema. The LLM fills this with a brief one-line summary of
+    what it's doing with this specific tool call (e.g. "Check if the config
+    file exists"). The frontend uses this for a human-readable tool call title.
+    """
     def decorator(func):
+        # Auto-inject 'description' property so the LLM describes each call
+        params = parameters.copy()
+        props = params.get("properties", {})
+        if "description" not in props:
+            props = {
+                "description": {
+                    "type": "string",
+                    "description": (
+                        "A brief one-line summary of what you are doing with this tool call. "
+                        "Example: 'Check if the config file exists' or 'Search for Python PDF libraries'."
+                    ),
+                },
+                **props,
+            }
+            params["properties"] = props
+
         _tools_map[name] = func
         _tools_schema.append({
             "type": "function",
             "function": {
                 "name": name,
                 "description": description,
-                "parameters": parameters,
+                "parameters": params,
             },
         })
         _tools_tags[name] = tags or []
