@@ -800,11 +800,6 @@ function App() {
       const data = await res.json();
       const list = data.sessions || [];
       setSessionList(list);
-      // Sync currentSessionId from server if not yet set
-      const serverCurrent = list.find((s: SessionItem) => s.is_current);
-      if (serverCurrent) {
-        setCurrentSessionId((prev) => prev || serverCurrent.id);
-      }
     } catch {
       // ignore
     }
