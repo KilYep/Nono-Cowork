@@ -180,14 +180,16 @@ export const ReasoningTrigger = memo(
     return (
       <CollapsibleTrigger
         className={cn(
-          "group/reasoning flex w-full items-center gap-1.5 py-1.5 focus:outline-none cursor-pointer",
+          "group/reasoning flex w-full items-center gap-2 py-1.5 px-2 -mx-2 rounded-md hover:bg-muted/40 focus:outline-none transition-colors cursor-pointer",
           className
         )}
         {...props}
       >
         {children ?? (
           <>
-            <BrainIcon className="size-3.5 text-muted-foreground/80" />
+            <div className="flex items-center justify-center w-[24px]">
+              <BrainIcon className="size-3.5 text-muted-foreground/80" />
+            </div>
             <span className="text-[13px] text-muted-foreground/80 transition-colors group-hover/reasoning:text-foreground text-left font-medium">
                {getThinkingMessage(isStreaming, duration)}
             </span>
@@ -210,7 +212,7 @@ export const ReasoningContent = memo(
   ({ className, children, ...props }: ReasoningContentProps) => (
     <CollapsibleContent
       className={cn(
-        "overflow-hidden outline-none data-[closed]:animate-collapsible-up data-[open]:animate-collapsible-down pl-[20px] pt-0.5 pb-2",
+        "overflow-hidden outline-none data-[closed]:animate-collapsible-up data-[open]:animate-collapsible-down pl-[32px] pt-0.5 pb-2",
         className
       )}
       {...props}

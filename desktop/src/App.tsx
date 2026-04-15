@@ -378,9 +378,37 @@ function summarizeToolNames(toolNames: string[]): string | null {
 }
 
 function AgentStepGroup({ title, children, defaultOpen, isStreaming }: { title: string, children: React.ReactNode, defaultOpen: boolean, isStreaming?: boolean }) {
+  const [isOpen, setIsOpen] = useState(defaultOpen || !!isStreaming);
+  const hasEverStreamedRef = useRef(!!isStreaming);
+  const [hasAutoClosed, setHasAutoClosed] = useState(false);
   const anchorOnOpenChange = useScrollAnchor();
+
+  // Auto-open when streaming starts
+  useEffect(() => {
+    if (isStreaming) {
+      hasEverStreamedRef.current = true;
+      setIsOpen(true);
+    }
+  }, [isStreaming]);
+
+  // Auto-close when streaming ends (container was flushed by content)
+  useEffect(() => {
+    if (hasEverStreamedRef.current && !isStreaming && isOpen && !hasAutoClosed) {
+      const timer = setTimeout(() => {
+        setIsOpen(false);
+        setHasAutoClosed(true);
+      }, 800);
+      return () => clearTimeout(timer);
+    }
+  }, [isStreaming, isOpen, hasAutoClosed]);
+
+  const handleOpenChange = useCallback((newOpen: boolean) => {
+    anchorOnOpenChange(newOpen);
+    setIsOpen(newOpen);
+  }, [anchorOnOpenChange]);
+
   return (
-    <Collapsible defaultOpen={defaultOpen} className="group/step w-full" onOpenChange={anchorOnOpenChange}>
+    <Collapsible open={isOpen} onOpenChange={handleOpenChange} className="group/step w-full">
       <CollapsibleTrigger className="flex w-full items-center gap-1 py-1.5 text-[13px] text-muted-foreground/80 hover:text-foreground transition-colors outline-none cursor-pointer">
         <span className="text-left capitalize">
           {isStreaming ? <Shimmer duration={1}>{title}</Shimmer> : title}
@@ -625,7 +653,7 @@ function PartsRenderer({
   // Loop end → flush remaining container (active during streaming)
   flushContainer(true);
 
-  return <>{output}</>;
+  return <div className="flex flex-col gap-1 w-full">{output}</div>;
 }
 
 // ── App ──
@@ -1479,7 +1507,10 @@ function App() {
           ) : (
             /* ── Conversation mode: messages + input at bottom ── */
             <>
-              <Conversation className="flex-1">
+              <div className="relative flex-1 min-h-0">
+                {/* Top gradient fade below title bar */}
+                <div className="pointer-events-none absolute inset-x-0 top-0 h-8 bg-gradient-to-b from-background to-transparent z-10" />
+                <Conversation className="h-full">
                 <ConversationContent className="w-[85%] max-w-5xl mx-auto pb-6">
                     {/* Skeleton loading for session switch */}
                     {loadingSession && (
@@ -1653,6 +1684,7 @@ function App() {
                 </ConversationContent>
                 <ConversationScrollButton />
               </Conversation>
+              </div>
 
               {/* Input area with gradient fade above */}
               <div className="relative shrink-0 px-4 pb-4">

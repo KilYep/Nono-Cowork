@@ -55,7 +55,9 @@ export function SearchToolCall({
   return (
     <Collapsible defaultOpen={defaultOpen} className="group/search w-full">
       <CollapsibleTrigger className="flex w-full items-center gap-2 py-1.5 px-2 -mx-2 rounded-md hover:bg-muted/40 focus:outline-none transition-colors cursor-pointer">
-        <Globe className="size-3.5 text-muted-foreground shrink-0" />
+        <div className="flex items-center justify-center w-[24px]">
+          <Globe className="size-3.5 text-muted-foreground shrink-0" />
+        </div>
         <span className="flex-1 text-[13px] text-muted-foreground/80 font-medium truncate text-left group-hover/search:text-foreground transition-colors">
           {query}
         </span>

@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, useEffect, useCallback } from "react";
 import {
   Plus,
   PanelLeftClose,
@@ -12,6 +12,8 @@ import {
   CloudOff,
   RefreshCw,
   Loader2,
+  Moon,
+  Sun,
 } from "lucide-react";
 import type { SyncState } from "@/hooks/use-sync-status";
 
@@ -104,6 +106,30 @@ export function Sidebar({
   const [historyExpanded, setHistoryExpanded] = useState(false);
   const [hoveredId, setHoveredId] = useState<string | null>(null);
   const grouped = groupByDate(sessions);
+
+  // Theme state
+  const [isDark, setIsDark] = useState(() => {
+    if (typeof window !== "undefined") {
+      return document.documentElement.classList.contains("dark");
+    }
+    return false;
+  });
+
+  // Initialize theme from localStorage on mount
+  useEffect(() => {
+    const saved = localStorage.getItem("theme");
+    if (saved === "dark" || (!saved && window.matchMedia("(prefers-color-scheme: dark)").matches)) {
+      document.documentElement.classList.add("dark");
+      setIsDark(true);
+    }
+  }, []);
+
+  const toggleTheme = useCallback(() => {
+    const next = !isDark;
+    setIsDark(next);
+    document.documentElement.classList.toggle("dark", next);
+    localStorage.setItem("theme", next ? "dark" : "light");
+  }, [isDark]);
 
   return (
     <aside
@@ -284,6 +310,15 @@ export function Sidebar({
               </div>
             );
           })()}
+
+          {/* Theme toggle */}
+          <button
+            onClick={toggleTheme}
+            className="flex items-center gap-2.5 w-full px-3 py-2 rounded-lg text-[13px] text-sidebar-foreground/40 hover:bg-sidebar-accent hover:text-sidebar-foreground/70 transition-colors"
+          >
+            {isDark ? <Sun size={15} strokeWidth={1.5} /> : <Moon size={15} strokeWidth={1.5} />}
+            <span>{isDark ? "Light Mode" : "Dark Mode"}</span>
+          </button>
 
           {/* Settings */}
           <button
