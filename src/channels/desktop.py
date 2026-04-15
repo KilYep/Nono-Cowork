@@ -898,9 +898,13 @@ async def get_sync_config():
                 {
                     "id": f["id"],
                     "label": f.get("label", f["id"]),
-                    "path": f["path"],
+                    # Expand ~ to absolute path — Syncthing config may store
+                    # paths with unexpanded ~ which breaks frontend path mapping.
+                    "path": os.path.expanduser(f["path"]),
                 }
                 for f in folders
+                # Filter out folders with empty IDs (config artifacts)
+                if f.get("id")
             ]
         }
     except Exception:

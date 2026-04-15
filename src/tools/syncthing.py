@@ -62,7 +62,8 @@ class SyncthingClient:
         if file_path:
             abs_path = os.path.abspath(file_path)
             for f in self._folder_cache:
-                if abs_path.startswith(os.path.abspath(f["path"])):
+                folder_path = os.path.abspath(os.path.expanduser(f["path"]))
+                if abs_path.startswith(folder_path):
                     return f["id"]
 
         # Try to match by workspace env var
@@ -70,7 +71,7 @@ class SyncthingClient:
         if workspace:
             workspace = os.path.abspath(os.path.expanduser(workspace))
             for f in self._folder_cache:
-                if os.path.abspath(f["path"]) == workspace:
+                if os.path.abspath(os.path.expanduser(f["path"])) == workspace:
                     return f["id"]
 
         # Fall back to first folder
