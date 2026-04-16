@@ -216,8 +216,10 @@ async function initializeSyncthingRuntime() {
       'serve',
       '--home', homePath,
       '--no-browser',
-      // Prevent auto-creation of default folder (v1 flag, harmless on v2)
-      '--no-default-folder',
+      // Syncthing v2 removed --no-default-folder; passing it makes the
+      // process exit with "unknown flag" and we'd hang 20s waiting for an
+      // apikey that will never be written. The pre-seeded config.xml above
+      // already prevents default-folder creation.
       '--gui-address', `127.0.0.1:${MANAGED_SYNCTHING_PORT}`,
     ],
     {
@@ -608,15 +610,23 @@ function createWindow() {
   });
   mainWindow.webContents.on('will-navigate', (event, url) => {
     const appUrl = mainWindow.webContents.getURL();
-    if (url !== appUrl && !url.startsWith('http://localhost')) {
+    // Accept both 127.0.0.1 and localhost so in-app nav works regardless of
+    // which form the dev server URL uses. We load from 127.0.0.1 by default
+    // (avoids the Windows IPv4/IPv6 mismatch), but stale links might still
+    // carry the `localhost` form.
+    const isInternalDev =
+      url.startsWith('http://127.0.0.1') || url.startsWith('http://localhost');
+    if (url !== appUrl && !isInternalDev) {
       event.preventDefault();
       shell.openExternal(url);
     }
   });
 
-  // In development, load Vite dev server
+  // In development, load Vite dev server. Explicit IPv4 to match the vite
+  // `server.host: '127.0.0.1'` binding — using `localhost` would leave us at
+  // the mercy of Windows + Node 17+ DNS resolution order.
   if (process.env.NODE_ENV === 'development' || !app.isPackaged) {
-    mainWindow.loadURL('http://localhost:5173');
+    mainWindow.loadURL('http://127.0.0.1:5173');
   } else {
     mainWindow.loadFile(path.join(__dirname, '../dist/index.html'));
   }

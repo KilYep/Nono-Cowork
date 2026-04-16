@@ -37,7 +37,7 @@ class SyncthingClient:
     """Lightweight Syncthing REST API client, wrapping only the functionality needed by Agent."""
 
     def __init__(self, url=None, api_key=None):
-        self.url = (url or os.getenv("SYNCTHING_URL", "http://localhost:8384")).rstrip("/")
+        self.url = (url or os.getenv("SYNCTHING_URL", "http://127.0.0.1:8384")).rstrip("/")
         self.api_key = api_key or os.getenv("SYNCTHING_API_KEY", "") or _auto_detect_api_key()
         self.headers = {"X-API-Key": self.api_key} if self.api_key else {}
         self._folder_cache = None  # Cached folder list
@@ -318,7 +318,7 @@ def sync_status() -> str:
         return result
 
     except requests.ConnectionError:
-        return "❌ Cannot connect to Syncthing (http://localhost:8384). Is the Syncthing service running?"
+        return "❌ Cannot connect to Syncthing (http://127.0.0.1:8384). Is the Syncthing service running?"
     except Exception as e:
         return f"❌ Failed to get sync status: {e}"
 

@@ -308,8 +308,10 @@ interface SessionStatus {
 }
 
 // ── Config ──
-// Defaults from .env, can be overridden by saved Electron config
-let API_BASE = import.meta.env.VITE_API_BASE || "http://localhost:8080";
+// Defaults from .env, can be overridden by saved Electron config.
+// Use 127.0.0.1 (not localhost) to avoid Windows + Node 17+ IPv4/IPv6
+// resolution mismatch when the backend binds 0.0.0.0 (IPv4-only on Windows).
+let API_BASE = import.meta.env.VITE_API_BASE || "http://127.0.0.1:8080";
 let API_TOKEN = import.meta.env.VITE_API_TOKEN || "";
 
 // Load saved config from Electron (called once on mount)

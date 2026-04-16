@@ -32,7 +32,7 @@ interface AutomationsResponse {
 
 // ── Config ──
 
-const API_BASE = import.meta.env.VITE_API_BASE || "http://localhost:8080";
+const API_BASE = import.meta.env.VITE_API_BASE || "http://127.0.0.1:8080";
 const API_TOKEN = import.meta.env.VITE_API_TOKEN || "";
 
 function authHeaders(extra: Record<string, string> = {}): Record<string, string> {
