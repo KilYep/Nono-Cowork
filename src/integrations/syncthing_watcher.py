@@ -280,6 +280,11 @@ class SyncthingEventWatcher:
         if self._thread and self._thread.is_alive():
             logger.info("Event watcher already running")
             return
+        # Validate our saved cursor against Syncthing's current event ID range.
+        # If Syncthing restarted since we saved state, its IDs have reset and
+        # our saved cursor is in the future — we'd block forever waiting for
+        # events with IDs > saved that will never come.
+        self._validate_last_seen_id()
         self._running = True
         self._thread = threading.Thread(
             target=self._event_loop,
@@ -288,6 +293,43 @@ class SyncthingEventWatcher:
         )
         self._thread.start()
         logger.info("Syncthing event watcher started (last_seen_id=%d)", self._last_seen_id)
+
+    def _validate_last_seen_id(self):
+        """Reset last_seen_id to 0 if Syncthing's event ID range no longer covers it.
+
+        Syncthing's event IDs are monotonic within a single run but reset on
+        restart. If our saved ID > Syncthing's current max ID, we'd never
+        see new events. Detect this at startup and reset.
+        """
+        if self._last_seen_id <= 0:
+            return
+        try:
+            # Fetch the full current event buffer. limit=1000 covers Syncthing's
+            # default buffer size; timeout=1 makes this return quickly even if
+            # no events are present. We only care about the max ID — we don't
+            # process these events (they're before our cursor by definition).
+            r = requests.get(
+                f"{self._st.url}/rest/events",
+                headers=self._st.headers,
+                params={"since": 0, "limit": 1000, "timeout": 1},
+                timeout=5,
+            )
+            r.raise_for_status()
+            events = r.json()
+            max_id = max((e.get("id", 0) for e in events), default=0)
+            if max_id < self._last_seen_id:
+                logger.warning(
+                    "Saved last_seen_id=%d exceeds Syncthing's max event ID=%d; "
+                    "Syncthing appears to have restarted — resetting to 0",
+                    self._last_seen_id, max_id,
+                )
+                self._last_seen_id = 0
+        except Exception as e:
+            # Any failure here → safer to reset than to hang silently
+            logger.warning(
+                "Could not validate last_seen_id (%s); resetting to 0 defensively", e
+            )
+            self._last_seen_id = 0
 
     def stop(self):
         """Stop the background event polling thread."""
