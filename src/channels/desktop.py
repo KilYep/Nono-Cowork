@@ -301,8 +301,14 @@ async def chat(request: Request):
 # ── RESTful: Session Management ──
 
 @app.get("/api/sessions")
-async def list_sessions():
-    """List all saved sessions for the desktop user."""
+async def list_sessions(workspace_id: str | None = None):
+    """List all saved sessions for the desktop user.
+
+    Query params:
+        workspace_id: when set, only return sessions belonging to that
+                     workspace. Sessions without a workspace_id fall back
+                     to the default workspace for filtering purposes.
+    """
     # Ensure there is always an active session in memory so get_status works
     # (on server restart, _sessions is empty until get_or_create is called)
     sessions.get_or_create(DESKTOP_USER_ID)
@@ -313,19 +319,45 @@ async def list_sessions():
     status = sessions.get_status(DESKTOP_USER_ID)
     active_id = status["session_id"] if status else None
 
+    # Resolve fallback workspace for sessions missing workspace_id
+    from core.workspace import workspaces as _workspaces
+    default_ws = _workspaces.get_default()
+    default_ws_id = default_ws["id"] if default_ws else None
+
     for s in saved:
         s["is_current"] = (s["id"] == active_id)
+        if not s.get("workspace_id"):
+            s["workspace_id"] = default_ws_id
+
+    if workspace_id:
+        saved = [s for s in saved if s.get("workspace_id") == workspace_id]
 
     return {"sessions": saved}
 
 
 @app.post("/api/sessions")
-async def create_session():
+async def create_session(request: Request):
     """Archive the current session and start a new one.
+
+    Body (optional): { workspace_id: str } — bind the new session to
+    a specific workspace. When omitted, inherits from the previous
+    session or falls back to the default workspace.
 
     Refuses if an agent is still running — otherwise reset() would close
     the log file out from under the running thread and crash it.
     """
+    # Accept optional body without failing when empty
+    workspace_id: str | None = None
+    try:
+        if request.headers.get("content-length", "0") != "0":
+            body = await request.json()
+            if isinstance(body, dict):
+                ws = body.get("workspace_id")
+                if ws:
+                    workspace_id = str(ws).strip() or None
+    except Exception:
+        workspace_id = None
+
     lock = sessions.get_lock(DESKTOP_USER_ID)
     if not lock.acquire(blocking=False):
         return JSONResponse(
@@ -333,12 +365,13 @@ async def create_session():
             status_code=409,
         )
     try:
-        sessions.reset(DESKTOP_USER_ID)
+        sessions.reset(DESKTOP_USER_ID, workspace_id=workspace_id)
     finally:
         lock.release()
     new_status = sessions.get_status(DESKTOP_USER_ID)
     return {
         "session_id": new_status["session_id"] if new_status else None,
+        "workspace_id": new_status["workspace_id"] if new_status else None,
         "message": "New session created",
     }
 
@@ -359,6 +392,7 @@ async def get_current_session():
 
     return {
         "id": session["session_id"],
+        "workspace_id": session.get("workspace_id"),
         "messages": display_messages,
         "model": session.get("model_override") or MODEL,
         "created_at": session["created_at"],
@@ -401,6 +435,7 @@ async def switch_session(session_id: str):
     return {
         "message": f"Switched to session {session_id}",
         "id": session["session_id"],
+        "workspace_id": session.get("workspace_id"),
         "messages": display_messages,
         "model": session.get("model_override") or MODEL,
         "created_at": session["created_at"],
@@ -970,6 +1005,177 @@ async def sync_pair(request: Request):
         )
 
 
+# ── RESTful: Workspace Management ──
+
+@app.get("/api/workspaces")
+async def list_workspaces():
+    """List all workspaces with current sync status annotations.
+
+    Response shape:
+      { workspaces: [{
+          id, label, folder_id, is_default, created_at, last_active,
+          folder_path, folder_state, folder_completion,  # null if folder missing
+          session_count,
+        }],
+        default_workspace_id: str | null,
+        active_workspace_id: str | null,   # workspace of the current session
+      }
+    """
+    from core.workspace import workspaces as _workspaces
+
+    # Ensure there's an active session so we can report active_workspace_id
+    sessions.get_or_create(DESKTOP_USER_ID)
+    status = sessions.get_status(DESKTOP_USER_ID)
+    active_ws_id = status.get("workspace_id") if status else None
+
+    ws_list = _workspaces.list()
+
+    # Build folder_id → (state, completion, path) map
+    folder_info: dict[str, dict] = {}
+    try:
+        from tools.syncthing import SyncthingClient
+        st = SyncthingClient()
+        for f in st.get_folders():
+            fid = f.get("id")
+            if not fid:
+                continue
+            entry = {"path": f.get("path"), "state": "unknown", "completion": 0.0}
+            try:
+                fs = st.get_folder_status(fid)
+                gb = fs.get("globalBytes", 0)
+                ib = fs.get("inSyncBytes", 0)
+                entry["state"] = fs.get("state", "unknown")
+                entry["completion"] = round(
+                    (ib / gb * 100) if gb > 0 else 100.0, 1,
+                )
+            except Exception:
+                pass
+            folder_info[fid] = entry
+    except Exception:
+        pass
+
+    # Session counts per workspace
+    all_sessions = sessions.list_sessions(DESKTOP_USER_ID)
+    default_ws = _workspaces.get_default()
+    default_ws_id = default_ws["id"] if default_ws else None
+    session_counts: dict[str, int] = {}
+    for s in all_sessions:
+        wsid = s.get("workspace_id") or default_ws_id
+        if wsid:
+            session_counts[wsid] = session_counts.get(wsid, 0) + 1
+
+    out = []
+    for w in ws_list:
+        finfo = folder_info.get(w.get("folder_id") or "", {})
+        out.append({
+            "id": w["id"],
+            "label": w["label"],
+            "folder_id": w.get("folder_id"),
+            "is_default": bool(w.get("is_default")),
+            "created_at": w.get("created_at", 0),
+            "last_active": w.get("last_active", 0),
+            "folder_path": finfo.get("path"),
+            "folder_state": finfo.get("state"),
+            "folder_completion": finfo.get("completion"),
+            "session_count": session_counts.get(w["id"], 0),
+        })
+
+    return {
+        "workspaces": out,
+        "default_workspace_id": default_ws_id,
+        "active_workspace_id": active_ws_id,
+    }
+
+
+@app.post("/api/workspaces")
+async def create_workspace(request: Request):
+    """Create a workspace bound to a Syncthing folder.
+
+    Body: { label: str, folder_id: str, is_default?: bool }
+
+    The folder must already exist (create it via POST /api/sync/folders first).
+    Returns the created workspace record.
+    """
+    from core.workspace import workspaces as _workspaces
+
+    try:
+        body = await request.json()
+    except Exception:
+        return JSONResponse({"error": "invalid JSON body"}, status_code=400)
+
+    label = (body.get("label") or "").strip()
+    folder_id = (body.get("folder_id") or "").strip()
+    is_default = bool(body.get("is_default"))
+
+    if not folder_id:
+        return JSONResponse({"error": "folder_id is required"}, status_code=400)
+
+    # Sanity check: folder must exist on VPS
+    try:
+        from tools.syncthing import SyncthingClient
+        st = SyncthingClient()
+        known = {f.get("id") for f in st.get_folders()}
+        if folder_id not in known:
+            return JSONResponse(
+                {"error": f"folder_id '{folder_id}' not found on VPS; "
+                          f"POST /api/sync/folders first"},
+                status_code=404,
+            )
+    except Exception as e:
+        logger.warning("Could not verify folder existence: %s", e)
+        # Proceed anyway — Syncthing may be temporarily unreachable
+
+    workspace = _workspaces.create(
+        label=label or folder_id,
+        folder_id=folder_id,
+        is_default=is_default,
+    )
+    return workspace
+
+
+@app.patch("/api/workspaces/{workspace_id}")
+async def patch_workspace(workspace_id: str, request: Request):
+    """Update a workspace's editable fields (label, is_default)."""
+    from core.workspace import workspaces as _workspaces
+
+    try:
+        body = await request.json()
+    except Exception:
+        return JSONResponse({"error": "invalid JSON body"}, status_code=400)
+
+    updates = {}
+    if "label" in body:
+        updates["label"] = str(body["label"]).strip() or "Workspace"
+    if "is_default" in body:
+        updates["is_default"] = bool(body["is_default"])
+
+    if not updates:
+        return JSONResponse({"error": "no fields to update"}, status_code=400)
+
+    result = _workspaces.update(workspace_id, **updates)
+    if not result:
+        return JSONResponse({"error": "workspace not found"}, status_code=404)
+    return result
+
+
+@app.delete("/api/workspaces/{workspace_id}")
+async def delete_workspace(workspace_id: str):
+    """Delete a workspace.
+
+    Does NOT delete the underlying Syncthing folder (that's done via
+    DELETE /api/sync/folders/{folder_id} separately, if desired).
+    Sessions that belonged to this workspace are NOT deleted — they
+    become orphans and will fall back to the default workspace when
+    loaded.
+    """
+    from core.workspace import workspaces as _workspaces
+    ok, msg = _workspaces.delete(workspace_id)
+    if not ok:
+        code = 404 if "not found" in msg else 409
+        return JSONResponse({"error": msg}, status_code=code)
+    return {"message": msg, "workspace_id": workspace_id}
+
+
 @app.post("/api/sync/folders")
 async def create_sync_folder(request: Request):
     """Desktop sends a folder to share; VPS creates a matching receive folder.
@@ -1001,7 +1207,22 @@ async def create_sync_folder(request: Request):
         existing = st.get_folders()
         for f in existing:
             if f["id"] == folder_id:
-                return {"folder_id": folder_id, "vps_path": f["path"], "already_exists": True}
+                # Make sure it has a workspace wrapper (idempotent)
+                ws_info = None
+                try:
+                    from core.workspace import workspaces as _workspaces
+                    ws_info = _workspaces.create(
+                        label=f.get("label") or folder_label,
+                        folder_id=folder_id,
+                    )
+                except Exception:
+                    pass
+                return {
+                    "folder_id": folder_id,
+                    "vps_path": f["path"],
+                    "already_exists": True,
+                    "workspace": ws_info,
+                }
 
         # Create receive directory
         import pathlib
@@ -1020,7 +1241,25 @@ async def create_sync_folder(request: Request):
         })
         logger.info("Created sync folder: %s → %s", folder_label, vps_path)
 
-        return {"folder_id": folder_id, "vps_path": vps_path, "already_exists": False}
+        # Auto-wrap the folder in a workspace so the UI always has a
+        # 1:1 workspace for every folder (V1 simplification).
+        workspace_info = None
+        try:
+            from core.workspace import workspaces as _workspaces
+            workspace_info = _workspaces.create(
+                label=folder_label,
+                folder_id=folder_id,
+            )
+        except Exception as e:
+            logger.warning("Failed to auto-create workspace for folder %s: %s",
+                           folder_id, e)
+
+        return {
+            "folder_id": folder_id,
+            "vps_path": vps_path,
+            "already_exists": False,
+            "workspace": workspace_info,
+        }
 
     except Exception as e:
         logger.error("Create sync folder failed: %s", e)
@@ -1043,7 +1282,26 @@ async def delete_sync_folder(folder_id: str):
         st._delete(f"/rest/config/folders/{folder_id}")
         logger.info("Removed sync folder: %s", folder_id)
 
-        return {"removed": True}
+        # Also drop the workspace that wrapped this folder (if any).
+        # If it was the default workspace we refuse and the caller
+        # should promote another workspace first.
+        removed_workspace_id = None
+        try:
+            from core.workspace import workspaces as _workspaces
+            ws = _workspaces.get_by_folder(folder_id)
+            if ws:
+                ok, _msg = _workspaces.delete(ws["id"])
+                if ok:
+                    removed_workspace_id = ws["id"]
+                else:
+                    logger.info(
+                        "Folder %s removed but its workspace %s is default; kept",
+                        folder_id, ws["id"],
+                    )
+        except Exception as e:
+            logger.warning("Workspace cleanup failed: %s", e)
+
+        return {"removed": True, "workspace_id": removed_workspace_id}
 
     except Exception as e:
         logger.error("Delete sync folder failed: %s", e)
@@ -2325,6 +2583,10 @@ def main():
     print(f"     GET  /api/sessions/current          — current session detail")
     print(f"     PUT  /api/sessions/:id/switch       — switch session")
     print(f"     DELETE /api/sessions/:id             — delete session")
+    print(f"     GET  /api/workspaces                — list workspaces")
+    print(f"     POST /api/workspaces                — create workspace")
+    print(f"     PATCH /api/workspaces/:id            — edit workspace (label/default)")
+    print(f"     DELETE /api/workspaces/:id           — delete workspace")
     print(f"     GET  /api/models                   — list models")
     print(f"     PUT  /api/models/current            — switch model")
     print(f"     GET  /api/notifications             — notification list")

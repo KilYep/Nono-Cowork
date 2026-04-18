@@ -28,6 +28,21 @@ def _session_path(session_id: str) -> str:
     return os.path.join(SESSIONS_DIR, f"{session_id}.json")
 
 
+def _pick_backfill_workspace_id() -> str | None:
+    """Pick a workspace_id for a session that lacks one.
+
+    Returns the default workspace's id, or None if no workspaces exist
+    yet (very fresh install — user will be routed through onboarding).
+    """
+    try:
+        from core.workspace import workspaces
+        ws = workspaces.get_default()
+        return ws["id"] if ws else None
+    except Exception as e:
+        logger.debug("Workspace lookup failed: %s", e)
+        return None
+
+
 # ─── Serialization helpers ──────────────────────────────────────
 
 def _serialize_message(msg) -> dict:
@@ -95,11 +110,15 @@ class SessionManager:
                 self._locks[user_id] = threading.Lock()
             return self._locks[user_id]
 
-    def get_or_create(self, user_id: str) -> dict:
+    def get_or_create(self, user_id: str, workspace_id: str | None = None) -> dict:
         """Get the active session for a user, or create a new one.
 
         On first call after startup, tries to restore the most recent
         session from disk. If none found, creates a fresh session.
+
+        If ``workspace_id`` is given, a newly-created session will be
+        bound to that workspace. A restored session keeps its own
+        recorded workspace_id (not overridden).
 
         NOTE: This does NOT update last_active.  last_active is only
         updated explicitly when a user sends a message (touch_session).
@@ -109,11 +128,17 @@ class SessionManager:
                 # Try to restore from disk
                 restored = self._load_latest_session(user_id)
                 if restored:
+                    # Backfill missing workspace_id on legacy sessions
+                    if not restored.get("workspace_id"):
+                        restored["workspace_id"] = _pick_backfill_workspace_id()
                     self._sessions[user_id] = restored
-                    logger.info("Restored session %s for user %s",
-                                restored["session_id"], user_id)
+                    logger.info("Restored session %s for user %s (workspace=%s)",
+                                restored["session_id"], user_id,
+                                restored.get("workspace_id"))
                 else:
-                    self._sessions[user_id] = self._create_new_session(user_id)
+                    self._sessions[user_id] = self._create_new_session(
+                        user_id, workspace_id=workspace_id,
+                    )
 
             return self._sessions[user_id]
 
@@ -124,21 +149,32 @@ class SessionManager:
             if session:
                 session["last_active"] = time.time()
 
-    def _create_new_session(self, user_id: str) -> dict:
-        """Create a brand new session."""
+    def _create_new_session(
+        self, user_id: str, workspace_id: str | None = None,
+    ) -> dict:
+        """Create a brand new session bound to a workspace.
+
+        If no workspace_id is provided, falls back to the default
+        workspace (if any). On a fresh install with zero workspaces,
+        workspace_id will be None — the frontend should route the user
+        through onboarding to create one before sending messages.
+        """
         from core.prompt import make_system_prompt
         from logger import create_log_file, log_event
 
         session_id = _generate_session_id()
+        resolved_ws_id = workspace_id or _pick_backfill_workspace_id()
         log_file = create_log_file()
         log_event(log_file, {
             "type": "session_start",
             "user_id": user_id,
             "session_id": session_id,
+            "workspace_id": resolved_ws_id,
         })
 
         session = {
             "session_id": session_id,
+            "workspace_id": resolved_ws_id,
             "history": [
                 {"role": "system", "content": make_system_prompt()}
             ],
@@ -173,6 +209,7 @@ class SessionManager:
             data = {
                 "id": session["session_id"],
                 "user_id": user_id,
+                "workspace_id": session.get("workspace_id"),
                 "created_at": session["created_at"],
                 "last_active": session["last_active"],
                 "token_stats": dict(session["token_stats"]),
@@ -240,6 +277,7 @@ class SessionManager:
 
         return {
             "session_id": data["id"],
+            "workspace_id": data.get("workspace_id"),
             "history": history,
             "token_stats": data.get("token_stats", {
                 "total_prompt_tokens": 0,
@@ -257,16 +295,22 @@ class SessionManager:
             "model_override": data.get("model_override"),
         }
 
-    def reset(self, user_id: str):
+    def reset(self, user_id: str, workspace_id: str | None = None):
         """Archive current session and start a new one.
 
         The old session file stays on disk for history.
         A new empty session is created immediately so that
         get_or_create doesn't reload the archived session.
+
+        If ``workspace_id`` is provided, the new session is bound to
+        that workspace. Otherwise it inherits from the archived session
+        (or falls back to the default workspace).
         """
+        inherited_ws_id: str | None = None
         with self._global_lock:
             if user_id in self._sessions:
                 old_session = self._sessions.pop(user_id)
+                inherited_ws_id = old_session.get("workspace_id")
                 # Signal stop to any running agent
                 stop_flag = old_session.get("stop_flag")
                 if stop_flag:
@@ -287,8 +331,11 @@ class SessionManager:
         self.save_session(user_id)
         # Create a new empty session so the next get_or_create
         # doesn't reload the just-archived one from disk
+        new_ws = workspace_id or inherited_ws_id
         with self._global_lock:
-            self._sessions[user_id] = self._create_new_session(user_id)
+            self._sessions[user_id] = self._create_new_session(
+                user_id, workspace_id=new_ws,
+            )
         # Persist the new session immediately (crash safety)
         self.save_session(user_id)
 
@@ -364,6 +411,7 @@ class SessionManager:
                 return None
             return {
                 "session_id": session["session_id"],
+                "workspace_id": session.get("workspace_id"),
                 "token_stats": dict(session["token_stats"]),
                 "history_len": len(session["history"]),
                 "created_at": session["created_at"],
@@ -406,6 +454,7 @@ class SessionManager:
 
                     results.append({
                         "id": data["id"],
+                        "workspace_id": data.get("workspace_id"),
                         "created_at": data.get("created_at", 0),
                         "last_active": data.get("last_active", 0),
                         "message_count": len(data.get("history", [])),
@@ -493,6 +542,7 @@ class SessionManager:
                     data = {
                         "id": session["session_id"],
                         "user_id": user_id,
+                        "workspace_id": session.get("workspace_id"),
                         "created_at": session["created_at"],
                         "last_active": session["last_active"],
                         "token_stats": dict(session["token_stats"]),

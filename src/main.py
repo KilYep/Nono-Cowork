@@ -77,6 +77,19 @@ def main():
     from integrations.syncthing_watcher import start_watcher as start_sync_watcher
     start_sync_watcher()
 
+    # Bootstrap workspaces: wrap every existing Syncthing folder in a
+    # workspace record (idempotent). Runs after the watcher so the
+    # Syncthing API is warmed up.
+    try:
+        from core.workspace import workspaces as _workspaces
+        bootstrapped = _workspaces.bootstrap_from_syncthing()
+        logger.info(
+            "Workspace bootstrap complete: %d workspace(s) registered",
+            len(bootstrapped),
+        )
+    except Exception as e:
+        logger.warning("Workspace bootstrap failed: %s", e)
+
     # File-drop automation (must start AFTER sync watcher)
     from automations.file_drop import start_file_drop_listener
     start_file_drop_listener()
