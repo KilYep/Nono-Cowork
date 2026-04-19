@@ -3,7 +3,6 @@ import {
   Plus,
   PanelLeftClose,
   Settings,
-  Clock,
   Trash2,
   ChevronRight,
   LayoutDashboard,
@@ -14,6 +13,11 @@ import {
   Loader2,
   Moon,
   Sun,
+  FolderPlus,
+  Folder,
+  FolderOpen,
+  Star,
+  MessageSquarePlus,
 } from "lucide-react";
 import type { SyncState } from "@/hooks/use-sync-status";
 
@@ -23,11 +27,25 @@ export type SidebarView = "chat" | "workspace" | "routines";
 
 export interface SessionItem {
   id: string;
+  workspace_id?: string | null;
   created_at: number;
   last_active: number;
   message_count: number;
   preview: string;
   is_current: boolean;
+}
+
+export interface WorkspaceItem {
+  id: string;
+  label: string;
+  folder_id: string | null;
+  is_default: boolean;
+  created_at: number;
+  last_active: number;
+  folder_path?: string | null;
+  folder_state?: string | null;
+  folder_completion?: number | null;
+  session_count: number;
 }
 
 interface SidebarProps {
@@ -38,6 +56,13 @@ interface SidebarProps {
   currentSessionId: string | null;
   onSelectSession: (id: string) => void;
   onDeleteSession?: (id: string) => void;
+  // Workspaces
+  workspaces: WorkspaceItem[];
+  activeWorkspaceId: string | null;
+  onNewWorkspace: () => void;
+  onNewChatInWorkspace: (workspaceId: string) => void;
+  onDeleteWorkspace?: (workspaceId: string) => void;
+  onRenameWorkspace?: (workspaceId: string) => void;
   // View switching
   activeView: SidebarView;
   onViewChange: (view: SidebarView) => void;
@@ -49,44 +74,16 @@ interface SidebarProps {
   onSettingsOpen?: () => void;
 }
 
-// ── Date grouping ──
-
-function groupByDate(sessions: SessionItem[]): [string, SessionItem[]][] {
-  const today = new Date();
-  today.setHours(0, 0, 0, 0);
-  const todayMs = today.getTime();
-  const yesterdayMs = todayMs - 86_400_000;
-  const weekMs = todayMs - 7 * 86_400_000;
-  const monthMs = todayMs - 30 * 86_400_000;
-
-  const groups = new Map<string, SessionItem[]>();
-  const order = ["Today", "Yesterday", "Previous 7 Days", "Previous 30 Days", "Older"];
-
-  for (const s of sessions) {
-    const t = s.last_active * 1000;
-    let group: string;
-    if (t >= todayMs) group = "Today";
-    else if (t >= yesterdayMs) group = "Yesterday";
-    else if (t >= weekMs) group = "Previous 7 Days";
-    else if (t >= monthMs) group = "Previous 30 Days";
-    else group = "Older";
-
-    if (!groups.has(group)) groups.set(group, []);
-    groups.get(group)!.push(s);
-  }
-
-  return order.filter((g) => groups.has(g)).map((g) => [g, groups.get(g)!]);
-}
-
 // ── Component ──
 
-// ── Sync status config ──
-
-const SYNC_INDICATOR: Record<SyncState, { icon: typeof Cloud; label: string; color: string; animate?: boolean }> = {
-  connected:    { icon: Cloud,    label: "Synced",        color: "text-emerald-500" },
-  syncing:      { icon: RefreshCw, label: "Syncing...",   color: "text-blue-400",    animate: true },
-  disconnected: { icon: CloudOff, label: "Disconnected", color: "text-sidebar-foreground/30" },
-  loading:      { icon: Loader2,  label: "Connecting...", color: "text-sidebar-foreground/30", animate: true },
+const SYNC_INDICATOR: Record<
+  SyncState,
+  { icon: typeof Cloud; label: string; color: string; animate?: boolean }
+> = {
+  connected:    { icon: Cloud,     label: "Synced",        color: "text-emerald-500" },
+  syncing:      { icon: RefreshCw, label: "Syncing...",    color: "text-blue-400",    animate: true },
+  disconnected: { icon: CloudOff,  label: "Disconnected",  color: "text-sidebar-foreground/30" },
+  loading:      { icon: Loader2,   label: "Connecting...", color: "text-sidebar-foreground/30", animate: true },
 };
 
 export function Sidebar({
@@ -97,15 +94,59 @@ export function Sidebar({
   currentSessionId,
   onSelectSession,
   onDeleteSession,
+  workspaces,
+  activeWorkspaceId,
+  onNewWorkspace,
+  onNewChatInWorkspace,
+  onDeleteWorkspace,
+  onRenameWorkspace,
   activeView,
   onViewChange,
   unreadCount,
   syncState = "loading",
   onSettingsOpen,
 }: SidebarProps) {
-  const [historyExpanded, setHistoryExpanded] = useState(false);
   const [hoveredId, setHoveredId] = useState<string | null>(null);
-  const grouped = groupByDate(sessions);
+  const [hoveredWsId, setHoveredWsId] = useState<string | null>(null);
+  const [expandedWsIds, setExpandedWsIds] = useState<Set<string>>(new Set());
+
+  // Auto-expand the active workspace on mount / when it changes
+  useEffect(() => {
+    if (activeWorkspaceId) {
+      setExpandedWsIds((prev) => {
+        if (prev.has(activeWorkspaceId)) return prev;
+        const next = new Set(prev);
+        next.add(activeWorkspaceId);
+        return next;
+      });
+    }
+  }, [activeWorkspaceId]);
+
+  const toggleWorkspace = useCallback((wsId: string) => {
+    setExpandedWsIds((prev) => {
+      const next = new Set(prev);
+      if (next.has(wsId)) next.delete(wsId);
+      else next.add(wsId);
+      return next;
+    });
+  }, []);
+
+  // Group sessions by workspace_id (with fallback bucket for unassigned).
+  // Sessions without a workspace_id fall into the default workspace.
+  const defaultWorkspaceId =
+    workspaces.find((w) => w.is_default)?.id || workspaces[0]?.id || null;
+
+  const sessionsByWorkspace = new Map<string, SessionItem[]>();
+  for (const s of sessions) {
+    const key = s.workspace_id || defaultWorkspaceId || "__none__";
+    const arr = sessionsByWorkspace.get(key) || [];
+    arr.push(s);
+    sessionsByWorkspace.set(key, arr);
+  }
+  // Sort each group by last_active desc
+  for (const arr of sessionsByWorkspace.values()) {
+    arr.sort((a, b) => b.last_active - a.last_active);
+  }
 
   // Theme state
   const [isDark, setIsDark] = useState(() => {
@@ -115,10 +156,12 @@ export function Sidebar({
     return false;
   });
 
-  // Initialize theme from localStorage on mount
   useEffect(() => {
     const saved = localStorage.getItem("theme");
-    if (saved === "dark" || (!saved && window.matchMedia("(prefers-color-scheme: dark)").matches)) {
+    if (
+      saved === "dark" ||
+      (!saved && window.matchMedia("(prefers-color-scheme: dark)").matches)
+    ) {
       document.documentElement.classList.add("dark");
       setIsDark(true);
     }
@@ -156,7 +199,7 @@ export function Sidebar({
           </button>
         </div>
 
-        {/* New Chat button */}
+        {/* New Chat button (for the current workspace) */}
         <div className="px-3 py-1">
           <button
             onClick={() => {
@@ -176,7 +219,7 @@ export function Sidebar({
           className="flex flex-col flex-1 overflow-y-auto"
           style={{ WebkitAppRegion: "no-drag", scrollbarGutter: "stable" } as React.CSSProperties}
         >
-          {/* ── Workspace — page navigation ── */}
+          {/* ── Workspace (notifications page) ── */}
           <div className="px-3">
             <button
               onClick={() => onViewChange("workspace")}
@@ -187,7 +230,7 @@ export function Sidebar({
               }`}
             >
               <LayoutDashboard size={16} strokeWidth={1.5} />
-              <span>Workspace</span>
+              <span>Inbox</span>
               {unreadCount > 0 && (
                 <span className="ml-auto flex items-center justify-center min-w-[18px] h-[18px] px-1 rounded-full bg-blue-500/15 text-[11px] font-medium text-blue-500 tabular-nums">
                   {unreadCount}
@@ -196,7 +239,7 @@ export function Sidebar({
             </button>
           </div>
 
-          {/* ── Routines — page navigation ── */}
+          {/* ── Routines ── */}
           <div className="px-3 mt-1">
             <button
               onClick={() => onViewChange("routines")}
@@ -211,83 +254,177 @@ export function Sidebar({
             </button>
           </div>
 
-          {/* ── History — collapsible ── */}
-          <div className="flex flex-col min-h-0">
+          {/* ── Workspaces section (one group per workspace) ── */}
+          <div className="mt-3 mx-3 flex items-center justify-between px-3 py-1">
+            <span className="text-[10px] font-semibold text-sidebar-foreground/40 uppercase tracking-wider">
+              Workspaces
+            </span>
             <button
-              onClick={() => setHistoryExpanded((p) => !p)}
-              className="flex items-center gap-2.5 mx-3 px-3 py-2 rounded-lg text-[13px] text-sidebar-foreground/55 hover:bg-sidebar-accent hover:text-sidebar-foreground/80 transition-colors"
+              onClick={onNewWorkspace}
+              title="New workspace"
+              className="p-1 rounded hover:bg-sidebar-accent text-sidebar-foreground/40 hover:text-sidebar-foreground/80 transition-colors"
             >
-              <Clock size={16} strokeWidth={1.5} />
-              <span>History</span>
-              {sessions.length > 0 && (
-                <span className="ml-auto text-[11px] text-sidebar-foreground/30 tabular-nums">
-                  {sessions.length}
-                </span>
-              )}
-              <ChevronRight
-                size={14}
-                className={`text-sidebar-foreground/30 transition-transform duration-200 ${
-                  historyExpanded ? "rotate-90" : ""
-                }`}
-              />
+              <FolderPlus size={13} strokeWidth={1.5} />
             </button>
+          </div>
 
-            {/* Expandable session list */}
-            {historyExpanded && (
-              <div className="flex flex-col mb-1.5 mt-0.5">
-                {sessions.length === 0 ? (
-                  <div className="flex flex-col text-sidebar-foreground/30 gap-1 py-4 ml-6">
-                    <p className="text-[12px]">No history</p>
-                  </div>
-                ) : (
-                  grouped.map(([group, items]) => (
-                    <div key={group} className="mb-2 last:mb-0 flex flex-col gap-0.5">
-                      <div className="ml-6 py-1 text-[10px] font-semibold text-sidebar-foreground/35 uppercase tracking-wider">
-                        {group}
-                      </div>
-                      {items.map((s) => {
-                        const isCurrent = s.id === currentSessionId;
-                        return (
-                        <div
-                          key={s.id}
-                          className="relative ml-5 mr-3"
-                          onMouseEnter={() => setHoveredId(s.id)}
-                          onMouseLeave={() => setHoveredId(null)}
-                        >
+          {workspaces.length === 0 ? (
+            <div className="mx-3 px-3 py-2 text-[12px] text-sidebar-foreground/40">
+              No workspaces yet.
+              <button
+                onClick={onNewWorkspace}
+                className="block mt-1 text-[12px] text-blue-500 hover:underline"
+              >
+                Create your first workspace →
+              </button>
+            </div>
+          ) : (
+            <div className="flex flex-col">
+              {workspaces.map((ws) => {
+                const isActive = ws.id === activeWorkspaceId;
+                const isExpanded = expandedWsIds.has(ws.id);
+                const wsSessions = sessionsByWorkspace.get(ws.id) || [];
+                const isHovered = hoveredWsId === ws.id;
+
+                return (
+                  <div key={ws.id} className="flex flex-col">
+                    {/* Workspace header */}
+                    <div
+                      className="relative mx-3"
+                      onMouseEnter={() => setHoveredWsId(ws.id)}
+                      onMouseLeave={() => setHoveredWsId(null)}
+                    >
+                      <button
+                        onClick={() => toggleWorkspace(ws.id)}
+                        className={`flex items-center gap-2 w-full px-3 py-1.5 rounded-lg text-[13px] transition-colors ${
+                          isActive
+                            ? "text-sidebar-foreground/90 font-medium"
+                            : "text-sidebar-foreground/70 hover:bg-sidebar-accent/60"
+                        }`}
+                      >
+                        <ChevronRight
+                          size={12}
+                          className={`text-sidebar-foreground/40 transition-transform duration-150 ${
+                            isExpanded ? "rotate-90" : ""
+                          }`}
+                        />
+                        {isExpanded ? (
+                          <FolderOpen size={14} strokeWidth={1.5} className="text-sidebar-foreground/60" />
+                        ) : (
+                          <Folder size={14} strokeWidth={1.5} className="text-sidebar-foreground/60" />
+                        )}
+                        <span className="truncate flex-1 text-left">{ws.label}</span>
+                        {ws.is_default && (
+                          <Star
+                            size={11}
+                            strokeWidth={1.5}
+                            className="text-sidebar-foreground/35 shrink-0"
+                          />
+                        )}
+                        {!isHovered && ws.session_count > 0 && (
+                          <span className="text-[11px] text-sidebar-foreground/30 tabular-nums shrink-0">
+                            {ws.session_count}
+                          </span>
+                        )}
+                      </button>
+
+                      {/* Hover actions: new chat / delete */}
+                      {isHovered && (
+                        <div className="absolute right-2 top-1/2 -translate-y-1/2 flex items-center gap-0.5">
                           <button
-                            onClick={() => {
-                              if (!isCurrent) onSelectSession(s.id);
-                              onViewChange("chat");
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              onNewChatInWorkspace(ws.id);
                             }}
-                            className={`w-full text-left px-3 py-1.5 rounded-lg text-[13px] truncate transition-colors pr-8 ${
-                              isCurrent && activeView === "chat"
-                                ? "bg-sidebar-accent text-sidebar-foreground/90"
-                                : "text-sidebar-foreground/55 hover:bg-sidebar-accent/50 hover:text-sidebar-foreground/80"
-                            }`}
+                            title="New chat here"
+                            className="p-1 rounded-md text-sidebar-foreground/40 hover:text-blue-500 hover:bg-blue-500/10"
                           >
-                            {s.preview || "New conversation"}
+                            <MessageSquarePlus size={12} />
                           </button>
-                          {onDeleteSession && hoveredId === s.id && !isCurrent && (
+                          {onRenameWorkspace && (
                             <button
                               onClick={(e) => {
                                 e.stopPropagation();
-                                onDeleteSession(s.id);
+                                onRenameWorkspace(ws.id);
                               }}
-                              className="absolute right-1.5 top-1/2 -translate-y-1/2 p-1 rounded-md text-sidebar-foreground/30 hover:text-red-500 hover:bg-red-500/10 transition-colors"
-                              aria-label="Delete session"
+                              title="Rename"
+                              className="p-1 rounded-md text-sidebar-foreground/40 hover:text-sidebar-foreground"
                             >
-                              <Trash2 size={13} />
+                              <Settings size={12} />
+                            </button>
+                          )}
+                          {onDeleteWorkspace && !ws.is_default && (
+                            <button
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                onDeleteWorkspace(ws.id);
+                              }}
+                              title="Delete workspace"
+                              className="p-1 rounded-md text-sidebar-foreground/40 hover:text-red-500 hover:bg-red-500/10"
+                            >
+                              <Trash2 size={12} />
                             </button>
                           )}
                         </div>
-                        );
-                      })}
+                      )}
                     </div>
-                  ))
-                )}
-              </div>
-            )}
-          </div>
+
+                    {/* Sessions under this workspace */}
+                    {isExpanded && (
+                      <div className="flex flex-col gap-0.5 mb-2">
+                        {wsSessions.length === 0 ? (
+                          <button
+                            onClick={() => onNewChatInWorkspace(ws.id)}
+                            className="ml-10 mr-3 px-3 py-1.5 text-left text-[12px] text-sidebar-foreground/35 hover:text-blue-500 transition-colors"
+                          >
+                            No chats yet — start one
+                          </button>
+                        ) : (
+                          wsSessions.map((s) => {
+                            const isCurrent = s.id === currentSessionId;
+                            return (
+                              <div
+                                key={s.id}
+                                className="relative ml-8 mr-3"
+                                onMouseEnter={() => setHoveredId(s.id)}
+                                onMouseLeave={() => setHoveredId(null)}
+                              >
+                                <button
+                                  onClick={() => {
+                                    if (!isCurrent) onSelectSession(s.id);
+                                    onViewChange("chat");
+                                  }}
+                                  className={`w-full text-left px-3 py-1.5 rounded-lg text-[12.5px] truncate transition-colors pr-8 ${
+                                    isCurrent && activeView === "chat"
+                                      ? "bg-sidebar-accent text-sidebar-foreground/90"
+                                      : "text-sidebar-foreground/55 hover:bg-sidebar-accent/50 hover:text-sidebar-foreground/80"
+                                  }`}
+                                >
+                                  {s.preview || "New conversation"}
+                                </button>
+                                {onDeleteSession && hoveredId === s.id && !isCurrent && (
+                                  <button
+                                    onClick={(e) => {
+                                      e.stopPropagation();
+                                      onDeleteSession(s.id);
+                                    }}
+                                    className="absolute right-1.5 top-1/2 -translate-y-1/2 p-1 rounded-md text-sidebar-foreground/30 hover:text-red-500 hover:bg-red-500/10 transition-colors"
+                                    aria-label="Delete session"
+                                  >
+                                    <Trash2 size={13} />
+                                  </button>
+                                )}
+                              </div>
+                            );
+                          })
+                        )}
+                      </div>
+                    )}
+                  </div>
+                );
+              })}
+            </div>
+          )}
         </div>
 
         {/* Footer: Sync status + Settings */}

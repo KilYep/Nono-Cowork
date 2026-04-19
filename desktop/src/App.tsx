@@ -89,7 +89,8 @@ import {
 } from "@/components/ai-elements/tool";
 import { SearchToolCall } from "@/components/ai-elements/search-tool";
 import { useScrollAnchor } from "@/components/ai-elements/use-scroll-anchor";
-import { Sidebar, type SessionItem, type SidebarView } from "@/components/sidebar";
+import { Sidebar, type SessionItem, type SidebarView, type WorkspaceItem } from "@/components/sidebar";
+import { NewWorkspaceDialog } from "@/components/new-workspace-dialog";
 import { type Notification, type Deliverable } from "@/components/notification-card";
 import { WorkspacePage } from "@/components/workspace-page";
 import { RoutinesPage } from "@/components/routines-page";
@@ -751,6 +752,10 @@ function App() {
   const [sidebarOpen, setSidebarOpen] = useState(true);
   const [sessionList, setSessionList] = useState<SessionItem[]>([]);
   const [currentSessionId, setCurrentSessionId] = useState<string | null>(null);
+  // Workspaces (Phase D — workspace-as-project)
+  const [workspaceList, setWorkspaceList] = useState<WorkspaceItem[]>([]);
+  const [activeWorkspaceId, setActiveWorkspaceId] = useState<string | null>(null);
+  const [newWorkspaceOpen, setNewWorkspaceOpen] = useState(false);
   const [availableModels, setAvailableModels] = useState<AvailableModels>([]);
   const [modelSelectorOpen, setModelSelectorOpen] = useState(false);
   // Track whether a stop request has been sent (for immediate UI feedback)
@@ -907,6 +912,23 @@ function App() {
     }
   }, []);
 
+  // Fetch workspaces list for sidebar
+  const fetchWorkspaces = useCallback(async () => {
+    try {
+      const res = await fetch(`${API_BASE}/api/workspaces`, { headers: authHeaders() });
+      if (!res.ok) return;
+      const data = await res.json();
+      setWorkspaceList(data.workspaces || []);
+      if (data.active_workspace_id) {
+        setActiveWorkspaceId(data.active_workspace_id);
+      } else if (data.default_workspace_id) {
+        setActiveWorkspaceId(data.default_workspace_id);
+      }
+    } catch {
+      // ignore
+    }
+  }, []);
+
   // Switch to a different conversation
   const handleSwitchSession = useCallback(async (sessionId: string) => {
     if (isStreaming) return;
@@ -937,14 +959,17 @@ function App() {
 
       idCounter.current = counter;
       setMessages(msgs);
+      // Switching sessions may change the active workspace
+      if (data.workspace_id) setActiveWorkspaceId(data.workspace_id);
       refreshStatus();
       fetchSessions();
+      fetchWorkspaces();
     } catch {
       // ignore
     } finally {
       setLoadingSession(false);
     }
-  }, [isStreaming, refreshStatus, fetchSessions]);
+  }, [isStreaming, refreshStatus, fetchSessions, fetchWorkspaces]);
 
   // ── Notifications ──
 
@@ -1074,12 +1099,13 @@ function App() {
     }
   }, [fetchNotifications]);
 
-  // Load session list, models, and notifications on mount
+  // Load session list, models, workspaces, and notifications on mount
   useEffect(() => {
     fetchSessions();
     fetchModels();
+    fetchWorkspaces();
     fetchNotifications();
-  }, [fetchSessions, fetchModels, fetchNotifications]);
+  }, [fetchSessions, fetchModels, fetchWorkspaces, fetchNotifications]);
 
   // SSE: real-time notification stream
   useEffect(() => {
@@ -1356,6 +1382,63 @@ function App() {
             handleSwitchSession(id);
             setActiveView("chat");
           }}
+          workspaces={workspaceList}
+          activeWorkspaceId={activeWorkspaceId}
+          onNewWorkspace={() => setNewWorkspaceOpen(true)}
+          onNewChatInWorkspace={(wsId) => {
+            // New chat scoped to a specific workspace
+            setMessages([]);
+            setIsStopping(false);
+            setCurrentSessionId(null);
+            setActiveWorkspaceId(wsId);
+            setActiveView("chat");
+            fetch(`${API_BASE}/api/sessions`, {
+              method: "POST",
+              headers: authHeaders({ "Content-Type": "application/json" }),
+              body: JSON.stringify({ workspace_id: wsId }),
+            })
+              .then((r) => r.json())
+              .then((data) => {
+                if (data.session_id) setCurrentSessionId(data.session_id);
+                if (data.workspace_id) setActiveWorkspaceId(data.workspace_id);
+                refreshStatus();
+                fetchSessions();
+                fetchWorkspaces();
+              })
+              .catch(() => {});
+          }}
+          onDeleteWorkspace={async (wsId) => {
+            try {
+              const res = await fetch(`${API_BASE}/api/workspaces/${wsId}`, {
+                method: "DELETE",
+                headers: authHeaders(),
+              });
+              if (res.ok) {
+                // If we deleted the active workspace, fall back to default
+                if (activeWorkspaceId === wsId) {
+                  setActiveWorkspaceId(null);
+                }
+                fetchWorkspaces();
+                fetchSessions();
+              } else {
+                const err = await res.json().catch(() => ({ error: "delete failed" }));
+                window.alert(`Could not delete workspace: ${err.error || res.status}`);
+              }
+            } catch { /* ignore */ }
+          }}
+          onRenameWorkspace={async (wsId) => {
+            const current = workspaceList.find((w) => w.id === wsId);
+            const next = window.prompt("New workspace name", current?.label || "");
+            if (!next || next === current?.label) return;
+            try {
+              await fetch(`${API_BASE}/api/workspaces/${wsId}`, {
+                method: "PATCH",
+                headers: authHeaders({ "Content-Type": "application/json" }),
+                body: JSON.stringify({ label: next.trim() }),
+              });
+              fetchWorkspaces();
+            } catch { /* ignore */ }
+          }}
           activeView={activeView}
           onViewChange={setActiveView}
           unreadCount={unreadCount}
@@ -1375,13 +1458,18 @@ function App() {
             // Fire server request in background — don't block UI
             fetch(`${API_BASE}/api/sessions`, {
               method: "POST",
-              headers: authHeaders(),
+              headers: authHeaders({ "Content-Type": "application/json" }),
+              body: JSON.stringify(
+                activeWorkspaceId ? { workspace_id: activeWorkspaceId } : {},
+              ),
             })
               .then((r) => r.json())
               .then((data) => {
                 if (data.session_id) setCurrentSessionId(data.session_id);
+                if (data.workspace_id) setActiveWorkspaceId(data.workspace_id);
                 refreshStatus();
                 fetchSessions();
+                fetchWorkspaces();
               })
               .catch(() => {});
           }}
@@ -1393,6 +1481,7 @@ function App() {
               });
               if (res.ok) {
                 fetchSessions();
+                fetchWorkspaces();
               }
             } catch { /* ignore */ }
           }}
@@ -1905,6 +1994,34 @@ function App() {
       apiBase={API_BASE}
       apiToken={API_TOKEN}
       syncState={syncState}
+    />
+    <NewWorkspaceDialog
+      open={newWorkspaceOpen}
+      onClose={() => setNewWorkspaceOpen(false)}
+      apiBase={API_BASE}
+      getHeaders={() => authHeaders()}
+      vpsDeviceId={syncStatus?.device_id || ""}
+      onCreated={(wsId) => {
+        // Refresh workspace list, switch into the new one, and start a fresh chat there.
+        setActiveWorkspaceId(wsId);
+        setActiveView("chat");
+        setMessages([]);
+        setIsStopping(false);
+        setCurrentSessionId(null);
+        fetchWorkspaces();
+        fetch(`${API_BASE}/api/sessions`, {
+          method: "POST",
+          headers: authHeaders({ "Content-Type": "application/json" }),
+          body: JSON.stringify({ workspace_id: wsId }),
+        })
+          .then((r) => r.json())
+          .then((data) => {
+            if (data.session_id) setCurrentSessionId(data.session_id);
+            refreshStatus();
+            fetchSessions();
+          })
+          .catch(() => {});
+      }}
     />
     </>
   );
