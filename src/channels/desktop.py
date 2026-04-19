@@ -37,6 +37,134 @@ DESKTOP_PORT = int(os.getenv("DESKTOP_PORT", "8080"))
 DESKTOP_API_TOKEN = os.getenv("DESKTOP_API_TOKEN", "")
 
 
+# ──────────────────────────────────────────────────────────────
+#  VPS-side folder path conventions
+# ──────────────────────────────────────────────────────────────
+# Synced workspace folders live under this parent on the VPS. Pure
+# dev/internal convention — users never see this name. Renamed from
+# the legacy "SyncFromLocal" for clarity.
+import pathlib as _pathlib
+VPS_SYNC_PARENT = _pathlib.Path.home() / "NonoWorkspaces"
+_LEGACY_SYNC_PARENT = _pathlib.Path.home() / "SyncFromLocal"
+
+
+def migrate_vps_sync_paths() -> dict:
+    """One-shot idempotent migration: SyncFromLocal/ → NonoWorkspaces/.
+
+    For every Syncthing folder whose `path` is under the legacy parent,
+    physically move the directory and update Syncthing's folder config
+    to point at the new location. Also self-heals folders whose path
+    was manually deleted — Syncthing stops complaining about "folder
+    path missing" after this.
+
+    Called at backend startup. Safe to run every time — does nothing
+    after the first successful pass.
+
+    Returns a summary dict {moved, healed, patched, ambiguous} for logs.
+    """
+    import shutil
+    summary = {"moved": 0, "healed": 0, "patched": 0, "ambiguous": 0, "skipped": 0}
+
+    try:
+        from tools.syncthing import SyncthingClient
+        st = SyncthingClient()
+        folders = st.get_folders()
+    except Exception as e:
+        logger.warning("[migrate_paths] Syncthing unreachable: %s", e)
+        return summary
+
+    # Ensure new parent exists before any move.
+    try:
+        VPS_SYNC_PARENT.mkdir(parents=True, exist_ok=True)
+    except Exception as e:
+        logger.error("[migrate_paths] Cannot create %s: %s", VPS_SYNC_PARENT, e)
+        return summary
+
+    for f in folders:
+        folder_id = f.get("id")
+        old_path_str = f.get("path") or ""
+        if not folder_id or not old_path_str:
+            continue
+        try:
+            old_p = _pathlib.Path(old_path_str)
+            rel = old_p.relative_to(_LEGACY_SYNC_PARENT)
+        except ValueError:
+            # Not under the legacy parent — leave alone (includes folders
+            # already at NonoWorkspaces/ or custom-pathed ones).
+            continue
+        except Exception:
+            continue
+
+        new_p = VPS_SYNC_PARENT / rel
+
+        # Decide move/heal/skip based on disk state.
+        old_exists = old_p.is_dir()
+        new_exists = new_p.exists()
+
+        if old_exists and not new_exists:
+            try:
+                shutil.move(str(old_p), str(new_p))
+                summary["moved"] += 1
+                logger.info("[migrate_paths] Moved %s → %s", old_p, new_p)
+            except Exception as e:
+                logger.error("[migrate_paths] Move failed %s → %s: %s",
+                             old_p, new_p, e)
+                summary["skipped"] += 1
+                continue
+        elif not old_exists and not new_exists:
+            # Self-heal: Syncthing has config but no physical path on
+            # either side. Create the new path so rescan succeeds.
+            try:
+                new_p.mkdir(parents=True, exist_ok=True)
+                summary["healed"] += 1
+                logger.info("[migrate_paths] Self-healed missing folder: %s", new_p)
+            except Exception as e:
+                logger.error("[migrate_paths] Could not create %s: %s", new_p, e)
+                summary["skipped"] += 1
+                continue
+        elif old_exists and new_exists:
+            # Ambiguous — both present. Don't clobber either; report.
+            logger.warning(
+                "[migrate_paths] Both %s and %s exist — manual inspection "
+                "needed; skipping.", old_p, new_p,
+            )
+            summary["ambiguous"] += 1
+            continue
+        # else: old_exists=False, new_exists=True → already migrated; just
+        # make sure Syncthing config also points at new_p (patch below).
+
+        # Patch Syncthing folder config path.
+        try:
+            patched = st._patch(
+                f"/rest/config/folders/{folder_id}",
+                {"path": str(new_p)},
+            )
+            if patched is not None:
+                summary["patched"] += 1
+                logger.info(
+                    "[migrate_paths] Syncthing config updated: %s → %s",
+                    folder_id, new_p,
+                )
+        except Exception as e:
+            logger.error(
+                "[migrate_paths] Failed to patch Syncthing config for %s: %s",
+                folder_id, e,
+            )
+
+    # Remove empty legacy parent so it stops showing up in `ls`.
+    try:
+        if _LEGACY_SYNC_PARENT.exists() and not any(_LEGACY_SYNC_PARENT.iterdir()):
+            _LEGACY_SYNC_PARENT.rmdir()
+            logger.info("[migrate_paths] Removed empty %s", _LEGACY_SYNC_PARENT)
+    except Exception as e:
+        logger.debug("[migrate_paths] Could not remove %s: %s",
+                     _LEGACY_SYNC_PARENT, e)
+
+    if any(summary[k] for k in ("moved", "healed", "patched", "ambiguous")):
+        logger.info("[migrate_paths] Done: %s", summary)
+    return summary
+
+
 class DesktopChannel(Channel):
     """HTTP + SSE channel for the Electron desktop client."""
 
@@ -923,7 +1051,7 @@ async def get_sync_config():
     """Return Syncthing folder config for frontend path mapping.
 
     The desktop frontend needs to convert VPS-side absolute paths
-    (e.g., /root/SyncFromLocal/inbox/report.pdf) to user-local paths
+    (e.g., /root/NonoWorkspaces/inbox/report.pdf) to user-local paths
     (e.g., D:\\Sync\\inbox\\report.pdf).  This endpoint provides the
     VPS-side folder roots so the frontend can compute the relative path.
     """
@@ -1315,7 +1443,7 @@ async def create_sync_folder(request: Request):
         desktop_device_id: str, # Desktop's Syncthing device ID
     }
 
-    VPS creates /root/SyncFromLocal/<folder_label>/ and shares it back.
+    VPS creates /root/NonoWorkspaces/<folder_label>/ and shares it back.
     """
     try:
         from tools.syncthing import SyncthingClient
@@ -1353,9 +1481,10 @@ async def create_sync_folder(request: Request):
                     "workspace": ws_info,
                 }
 
-        # Create receive directory
+        # Create receive directory. NonoWorkspaces/ is our canonical VPS-side
+        # parent for all synced folders (dev convention, not user-facing).
         import pathlib
-        vps_path = str(pathlib.Path.home() / "SyncFromLocal" / folder_label)
+        vps_path = str(pathlib.Path.home() / "NonoWorkspaces" / folder_label)
         os.makedirs(vps_path, exist_ok=True)
 
         # Create Syncthing folder config on VPS
