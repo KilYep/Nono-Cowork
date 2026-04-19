@@ -319,15 +319,18 @@ async def list_sessions(workspace_id: str | None = None):
     status = sessions.get_status(DESKTOP_USER_ID)
     active_id = status["session_id"] if status else None
 
-    # Resolve fallback workspace for sessions missing workspace_id
+    # Resolve fallback workspace for sessions missing workspace_id.
+    # Uses the soft fallback (default → most-recently-active) so orphan
+    # sessions always render under *some* workspace group, even before
+    # the user has chosen a real default via onboarding.
     from core.workspace import workspaces as _workspaces
-    default_ws = _workspaces.get_default()
-    default_ws_id = default_ws["id"] if default_ws else None
+    fallback_ws = _workspaces.get_any_fallback()
+    fallback_ws_id = fallback_ws["id"] if fallback_ws else None
 
     for s in saved:
         s["is_current"] = (s["id"] == active_id)
         if not s.get("workspace_id"):
-            s["workspace_id"] = default_ws_id
+            s["workspace_id"] = fallback_ws_id
 
     if workspace_id:
         saved = [s for s in saved if s.get("workspace_id") == workspace_id]
@@ -1054,13 +1057,17 @@ async def list_workspaces():
     except Exception:
         pass
 
-    # Session counts per workspace
+    # Session counts per workspace. Use the soft fallback for orphan
+    # sessions so they contribute to whichever workspace the sidebar
+    # will render them under.
     all_sessions = sessions.list_sessions(DESKTOP_USER_ID)
     default_ws = _workspaces.get_default()
     default_ws_id = default_ws["id"] if default_ws else None
+    fallback_ws = _workspaces.get_any_fallback()
+    fallback_ws_id = fallback_ws["id"] if fallback_ws else None
     session_counts: dict[str, int] = {}
     for s in all_sessions:
-        wsid = s.get("workspace_id") or default_ws_id
+        wsid = s.get("workspace_id") or fallback_ws_id
         if wsid:
             session_counts[wsid] = session_counts.get(wsid, 0) + 1
 

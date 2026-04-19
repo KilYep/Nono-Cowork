@@ -44,18 +44,21 @@ def _resolve_workspace(workspace_id: str | None = None) -> str:
         except Exception as e:
             logger.debug("Workspace-scoped resolve failed: %s", e)
 
-    # 2. Default workspace
+    # 2. Default-or-fallback workspace. Uses the soft fallback (real
+    #    default if set, else most-recently-active) so agents in older
+    #    sessions still get a concrete folder even before the user has
+    #    gone through onboarding to pick a real default.
     try:
         from core.workspace import workspaces
         from tools.syncthing import SyncthingClient
-        default = workspaces.get_default()
-        if default and default.get("folder_id"):
+        fallback = workspaces.get_any_fallback()
+        if fallback and fallback.get("folder_id"):
             st = SyncthingClient()
             for f in st.get_folders():
-                if f.get("id") == default["folder_id"]:
+                if f.get("id") == fallback["folder_id"]:
                     return f["path"]
     except Exception as e:
-        logger.debug("Default-workspace resolve failed: %s", e)
+        logger.debug("Fallback-workspace resolve failed: %s", e)
 
     # 3. env override
     env_workspace = os.getenv("WORKSPACE_DIR", "").strip()

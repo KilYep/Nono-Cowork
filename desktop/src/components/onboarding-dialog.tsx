@@ -20,6 +20,12 @@ interface OnboardingDialogProps {
   apiBase: string;
   getHeaders: () => Record<string, string>;
   vpsDeviceId: string;
+  /**
+   * If true, the user already has some workspaces but none is the
+   * safety-net default — the dialog uses "Set up your default workspace"
+   * wording so it doesn't look like a first-launch dialog.
+   */
+  existingWorkspaces?: boolean;
   /** Called with the workspace_id after success; caller should refresh workspaces. */
   onCreated: (workspaceId: string) => void;
 }
@@ -30,6 +36,7 @@ export function OnboardingDialog({
   apiBase,
   getHeaders,
   vpsDeviceId,
+  existingWorkspaces = false,
   onCreated,
 }: OnboardingDialogProps) {
   const [isWorking, setIsWorking] = useState(false);
@@ -211,7 +218,7 @@ export function OnboardingDialog({
       >
         <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
           <h2 style={{ margin: 0, fontSize: 16, fontWeight: 600, color: "#1F1E1D" }}>
-            Set up your first workspace
+            {existingWorkspaces ? "Set up your default workspace" : "Set up your first workspace"}
           </h2>
           <button
             type="button"
@@ -231,8 +238,9 @@ export function OnboardingDialog({
         </div>
 
         <p style={{ margin: 0, fontSize: 13, color: "#5A5856", lineHeight: 1.5 }}>
-          A workspace pairs a local folder with Nono CoWork so your agent can
-          read and edit files there. You can always change or add more later.
+          {existingWorkspaces
+            ? "Your default workspace is a safety-net that can't be deleted, so there's always somewhere for new chats to land. Pick one now — your existing workspaces stay untouched."
+            : "A workspace pairs a local folder with Nono CoWork so your agent can read and edit files there. You can always change or add more later."}
         </p>
 
         {/* Option 1: default */}

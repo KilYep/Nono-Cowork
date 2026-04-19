@@ -40,13 +40,29 @@ declare global {
       syncthingAddFolder: (args: {
         localPath: string;
         vpsDeviceId: string;
-      }) => Promise<{ success: boolean; folderId: string; folderLabel: string; localPath: string; alreadyExists: boolean; error?: string }>;
+      }) => Promise<{
+        success: boolean;
+        folderId: string;
+        folderLabel: string;
+        localPath: string;
+        alreadyExists: boolean;
+        /** True when a default .stignore was written into the folder root. */
+        wroteDefaultIgnore?: boolean;
+        error?: string;
+      }>;
       syncthingListSyncFolders: (args: {
         vpsDeviceId: string;
       }) => Promise<{ success: boolean; folders: Array<{ id: string; label: string; path: string }>; error?: string }>;
       syncthingRemoveFolder: (args: {
         folderId: string;
       }) => Promise<{ success: boolean; error?: string }>;
+      syncthingEnsureIgnores: () => Promise<{
+        success: boolean;
+        checked?: number;
+        written?: number;
+        written_paths?: string[];
+        error?: string;
+      }>;
       // Onboarding helpers for default workspace
       getHomeDir: () => Promise<{ success: boolean; path?: string; error?: string }>;
       ensureDir: (dirPath: string) => Promise<{ success: boolean; path?: string; error?: string }>;
@@ -95,6 +111,8 @@ import { useScrollAnchor } from "@/components/ai-elements/use-scroll-anchor";
 import { Sidebar, type SessionItem, type SidebarView, type WorkspaceItem } from "@/components/sidebar";
 import { NewWorkspaceDialog } from "@/components/new-workspace-dialog";
 import { OnboardingDialog } from "@/components/onboarding-dialog";
+import { ConfirmDialog } from "@/components/confirm-dialog";
+import { RenameDialog } from "@/components/rename-dialog";
 import { type Notification, type Deliverable } from "@/components/notification-card";
 import { WorkspacePage } from "@/components/workspace-page";
 import { RoutinesPage } from "@/components/routines-page";
@@ -766,6 +784,37 @@ function App() {
   // sidebar's `+ New Workspace` button.
   const [onboardingDismissed, setOnboardingDismissed] = useState(false);
   const [workspacesLoaded, setWorkspacesLoaded] = useState(false);
+  // Strictly "is there a workspace marked is_default=true?" — separate
+  // from `workspaceList.length > 0` so we can still prompt onboarding
+  // when the user has workspaces but none of them is the safety-net.
+  const [hasDefaultWorkspace, setHasDefaultWorkspace] = useState(false);
+
+  // Confirmation / rename dialog state. Each holds a discriminated
+  // payload describing the pending action + a `busy` flag so the
+  // dialog can show a disabled state while the request is in flight.
+  type PendingConfirm =
+    | {
+        kind: "delete-workspace";
+        wsId: string;
+        label: string;
+        sessionCount: number;
+        busy: boolean;
+      }
+    | {
+        kind: "delete-session";
+        sessionId: string;
+        preview: string;
+        busy: boolean;
+      };
+  const [pendingConfirm, setPendingConfirm] = useState<PendingConfirm | null>(null);
+
+  type PendingRename = {
+    kind: "workspace";
+    wsId: string;
+    current: string;
+    busy: boolean;
+  };
+  const [pendingRename, setPendingRename] = useState<PendingRename | null>(null);
   // Resolve the active workspace record (fallback to default if unset) so the
   // sync widget and other workspace-scoped UI can bind to a concrete folder.
   const activeWorkspace =
@@ -935,6 +984,7 @@ function App() {
       if (!res.ok) return;
       const data = await res.json();
       setWorkspaceList(data.workspaces || []);
+      setHasDefaultWorkspace(!!data.default_workspace_id);
       if (data.active_workspace_id) {
         setActiveWorkspaceId(data.active_workspace_id);
       } else if (data.default_workspace_id) {
@@ -1117,18 +1167,22 @@ function App() {
     }
   }, [fetchNotifications]);
 
-  // First-launch onboarding: when workspaces have loaded, the list is empty,
-  // sync is connected, and the user hasn't already dismissed it this run.
-  // We do NOT force it — the X/Escape still closes the dialog; the user can
-  // come back via `+ New Workspace` in the sidebar.
+  // First-launch / no-default onboarding. Opens when:
+  //   - workspaces have loaded
+  //   - no workspace is marked as the safety-net default
+  //   - sync is connected (we need the VPS device id to create folders)
+  //   - the user hasn't already dismissed it this app lifetime
+  // Critically, the absence of a default triggers this even when other
+  // workspaces already exist — that's the state a user lands in after
+  // the v1→v2 migration demotes their auto-promoted workspace.
   useEffect(() => {
     if (!workspacesLoaded) return;
     if (onboardingDismissed) return;
-    if (workspaceList.length > 0) return;
+    if (hasDefaultWorkspace) return;
     if (syncState !== "connected") return;
     if (!syncStatus?.device_id) return;
     setOnboardingOpen(true);
-  }, [workspacesLoaded, onboardingDismissed, workspaceList.length, syncState, syncStatus?.device_id]);
+  }, [workspacesLoaded, onboardingDismissed, hasDefaultWorkspace, syncState, syncStatus?.device_id]);
 
   // Load session list, models, workspaces, and notifications on mount
   useEffect(() => {
@@ -1137,6 +1191,35 @@ function App() {
     fetchWorkspaces();
     fetchNotifications();
   }, [fetchSessions, fetchModels, fetchWorkspaces, fetchNotifications]);
+
+  // One-shot retrofit: drop a default .stignore into any already-synced folder
+  // that doesn't have one. Fixes historical folders that were syncing node_modules
+  // / .venv / etc before the ignore-on-create logic existed.
+  useEffect(() => {
+    const api = window.electronAPI;
+    if (!api?.syncthingEnsureIgnores) return;
+    let cancelled = false;
+    (async () => {
+      try {
+        const res = await api.syncthingEnsureIgnores();
+        if (cancelled) return;
+        if (res.success && (res.written ?? 0) > 0) {
+          toast.info(
+            `Added default ignore rules to ${res.written} sync folder${res.written === 1 ? "" : "s"}`,
+            {
+              description:
+                "node_modules, .venv, caches and secrets will stop syncing. You may want to delete already-uploaded copies on the VPS.",
+            },
+          );
+        }
+      } catch {
+        // silent — non-critical retrofit
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, []);
 
   // SSE: real-time notification stream
   useEffect(() => {
@@ -1438,37 +1521,29 @@ function App() {
               })
               .catch(() => {});
           }}
-          onDeleteWorkspace={async (wsId) => {
-            try {
-              const res = await fetch(`${API_BASE}/api/workspaces/${wsId}`, {
-                method: "DELETE",
-                headers: authHeaders(),
-              });
-              if (res.ok) {
-                // If we deleted the active workspace, fall back to default
-                if (activeWorkspaceId === wsId) {
-                  setActiveWorkspaceId(null);
-                }
-                fetchWorkspaces();
-                fetchSessions();
-              } else {
-                const err = await res.json().catch(() => ({ error: "delete failed" }));
-                window.alert(`Could not delete workspace: ${err.error || res.status}`);
-              }
-            } catch { /* ignore */ }
+          onDeleteWorkspace={(wsId) => {
+            // Dispatch to the confirm dialog; actual API call happens in
+            // the dialog's onConfirm handler below so the user sees a
+            // proper "are you sure?" prompt + post-action toast.
+            const ws = workspaceList.find((w) => w.id === wsId);
+            if (!ws) return;
+            setPendingConfirm({
+              kind: "delete-workspace",
+              wsId,
+              label: ws.label,
+              sessionCount: ws.session_count || 0,
+              busy: false,
+            });
           }}
-          onRenameWorkspace={async (wsId) => {
+          onRenameWorkspace={(wsId) => {
             const current = workspaceList.find((w) => w.id === wsId);
-            const next = window.prompt("New workspace name", current?.label || "");
-            if (!next || next === current?.label) return;
-            try {
-              await fetch(`${API_BASE}/api/workspaces/${wsId}`, {
-                method: "PATCH",
-                headers: authHeaders({ "Content-Type": "application/json" }),
-                body: JSON.stringify({ label: next.trim() }),
-              });
-              fetchWorkspaces();
-            } catch { /* ignore */ }
+            if (!current) return;
+            setPendingRename({
+              kind: "workspace",
+              wsId,
+              current: current.label,
+              busy: false,
+            });
           }}
           activeView={activeView}
           onViewChange={setActiveView}
@@ -1504,17 +1579,17 @@ function App() {
               })
               .catch(() => {});
           }}
-          onDeleteSession={async (id) => {
-            try {
-              const res = await fetch(`${API_BASE}/api/sessions/${id}`, {
-                method: "DELETE",
-                headers: authHeaders(),
-              });
-              if (res.ok) {
-                fetchSessions();
-                fetchWorkspaces();
-              }
-            } catch { /* ignore */ }
+          onDeleteSession={(id) => {
+            // Resolve a short preview of the chat so the confirm
+            // dialog can say "Delete chat \"Fix login bug\"?"
+            const s = sessionList.find((x) => x.id === id);
+            const preview = (s?.preview || "this chat").toString().trim();
+            setPendingConfirm({
+              kind: "delete-session",
+              sessionId: id,
+              preview,
+              busy: false,
+            });
           }}
         />
 
@@ -2035,6 +2110,7 @@ function App() {
       apiBase={API_BASE}
       getHeaders={() => authHeaders()}
       vpsDeviceId={syncStatus?.device_id || ""}
+      existingWorkspaces={workspaceList.length > 0}
       onCreated={(wsId) => {
         setActiveWorkspaceId(wsId);
         setActiveView("chat");
@@ -2085,6 +2161,134 @@ function App() {
             fetchSessions();
           })
           .catch(() => {});
+      }}
+    />
+    <ConfirmDialog
+      open={pendingConfirm !== null}
+      busy={pendingConfirm?.busy}
+      tone="danger"
+      title={
+        pendingConfirm?.kind === "delete-workspace"
+          ? `Delete workspace "${pendingConfirm.label}"?`
+          : pendingConfirm?.kind === "delete-session"
+          ? "Delete this chat?"
+          : ""
+      }
+      description={
+        pendingConfirm?.kind === "delete-workspace" ? (
+          <>
+            {pendingConfirm.sessionCount > 0 ? (
+              <p style={{ margin: 0 }}>
+                <strong>{pendingConfirm.sessionCount}</strong>
+                {pendingConfirm.sessionCount === 1 ? " chat" : " chats"} in
+                this workspace will fall back to your default workspace —
+                the chats themselves won't be deleted.
+              </p>
+            ) : (
+              <p style={{ margin: 0 }}>This workspace has no chats.</p>
+            )}
+            <p style={{ margin: "6px 0 0", color: "#8A8886" }}>
+              The underlying Syncthing folder is not touched by this action.
+            </p>
+          </>
+        ) : pendingConfirm?.kind === "delete-session" ? (
+          <p style={{ margin: 0 }}>
+            {pendingConfirm.preview.length > 120
+              ? pendingConfirm.preview.slice(0, 120) + "…"
+              : pendingConfirm.preview}
+          </p>
+        ) : null
+      }
+      confirmLabel={pendingConfirm?.kind === "delete-workspace" ? "Delete workspace" : "Delete chat"}
+      onCancel={() => {
+        if (pendingConfirm?.busy) return;
+        setPendingConfirm(null);
+      }}
+      onConfirm={async () => {
+        if (!pendingConfirm || pendingConfirm.busy) return;
+
+        if (pendingConfirm.kind === "delete-workspace") {
+          const { wsId, label } = pendingConfirm;
+          setPendingConfirm({ ...pendingConfirm, busy: true });
+          try {
+            const res = await fetch(`${API_BASE}/api/workspaces/${wsId}`, {
+              method: "DELETE",
+              headers: authHeaders(),
+            });
+            if (res.ok) {
+              if (activeWorkspaceId === wsId) setActiveWorkspaceId(null);
+              fetchWorkspaces();
+              fetchSessions();
+              toast.success(`Deleted workspace "${label}"`);
+              setPendingConfirm(null);
+            } else {
+              const err = await res.json().catch(() => ({ error: "delete failed" }));
+              toast.error(err.error || `Could not delete workspace (HTTP ${res.status})`);
+              setPendingConfirm({ ...pendingConfirm, busy: false });
+            }
+          } catch {
+            toast.error("Network error — could not delete workspace");
+            setPendingConfirm({ ...pendingConfirm, busy: false });
+          }
+          return;
+        }
+
+        if (pendingConfirm.kind === "delete-session") {
+          const { sessionId } = pendingConfirm;
+          setPendingConfirm({ ...pendingConfirm, busy: true });
+          try {
+            const res = await fetch(`${API_BASE}/api/sessions/${sessionId}`, {
+              method: "DELETE",
+              headers: authHeaders(),
+            });
+            if (res.ok) {
+              fetchSessions();
+              fetchWorkspaces();
+              toast.success("Chat deleted");
+              setPendingConfirm(null);
+            } else {
+              toast.error(`Could not delete chat (HTTP ${res.status})`);
+              setPendingConfirm({ ...pendingConfirm, busy: false });
+            }
+          } catch {
+            toast.error("Network error — could not delete chat");
+            setPendingConfirm({ ...pendingConfirm, busy: false });
+          }
+        }
+      }}
+    />
+    <RenameDialog
+      open={pendingRename !== null}
+      busy={pendingRename?.busy}
+      title="Rename workspace"
+      label="Workspace name"
+      initialValue={pendingRename?.current || ""}
+      onCancel={() => {
+        if (pendingRename?.busy) return;
+        setPendingRename(null);
+      }}
+      onConfirm={async (next) => {
+        if (!pendingRename || pendingRename.busy) return;
+        const { wsId, current } = pendingRename;
+        setPendingRename({ ...pendingRename, busy: true });
+        try {
+          const res = await fetch(`${API_BASE}/api/workspaces/${wsId}`, {
+            method: "PATCH",
+            headers: authHeaders({ "Content-Type": "application/json" }),
+            body: JSON.stringify({ label: next }),
+          });
+          if (res.ok) {
+            fetchWorkspaces();
+            toast.success(`Renamed "${current}" → "${next}"`);
+            setPendingRename(null);
+          } else {
+            toast.error(`Could not rename workspace (HTTP ${res.status})`);
+            setPendingRename({ ...pendingRename, busy: false });
+          }
+        } catch {
+          toast.error("Network error — could not rename workspace");
+          setPendingRename({ ...pendingRename, busy: false });
+        }
       }}
     />
     </>

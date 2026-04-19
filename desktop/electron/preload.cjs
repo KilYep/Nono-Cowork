@@ -22,6 +22,7 @@ contextBridge.exposeInMainWorld('electronAPI', {
   syncthingAddFolder: (args) => ipcRenderer.invoke('syncthing-add-folder', args),
   syncthingListSyncFolders: (args) => ipcRenderer.invoke('syncthing-list-sync-folders', args),
   syncthingRemoveFolder: (args) => ipcRenderer.invoke('syncthing-remove-folder', args),
+  syncthingEnsureIgnores: () => ipcRenderer.invoke('syncthing-ensure-ignores'),
   // Used by default-workspace onboarding
   getHomeDir: () => ipcRenderer.invoke('get-home-dir'),
   ensureDir: (dirPath) => ipcRenderer.invoke('ensure-dir', { path: dirPath }),

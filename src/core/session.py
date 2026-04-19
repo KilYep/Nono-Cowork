@@ -31,12 +31,18 @@ def _session_path(session_id: str) -> str:
 def _pick_backfill_workspace_id() -> str | None:
     """Pick a workspace_id for a session that lacks one.
 
-    Returns the default workspace's id, or None if no workspaces exist
-    yet (very fresh install — user will be routed through onboarding).
+    Uses the strict default workspace if one is set, otherwise falls
+    back to the most-recently-active workspace so the session still has
+    a concrete home. Returns None only when zero workspaces exist
+    (fresh install — the user will be routed through onboarding).
+
+    Note: this is *data-layer* fallback. The UI-level notion of
+    "default" (delete button hidden, default badge shown) remains
+    strict — see WorkspaceManager.get_default().
     """
     try:
         from core.workspace import workspaces
-        ws = workspaces.get_default()
+        ws = workspaces.get_any_fallback()
         return ws["id"] if ws else None
     except Exception as e:
         logger.debug("Workspace lookup failed: %s", e)

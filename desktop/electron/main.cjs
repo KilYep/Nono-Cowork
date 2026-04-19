@@ -330,6 +330,109 @@ function generateFolderId() {
  * Add a local folder to Syncthing and share it with the VPS device.
  * Returns { folderId, folderLabel, localPath }.
  */
+// Default Syncthing ignore patterns. Applied as a `.stignore` file at
+// the root of any folder we create or adopt, but only if one doesn't
+// already exist (we never overwrite the user's custom ignore list).
+//
+// Philosophy:
+//   - Block things that are *regenerable* (node_modules, __pycache__,
+//     .venv, dist/, build/) — recreating them on the VPS is wasteful and
+//     can cause sync churn with thousands of small files.
+//   - Block OS/editor droppings (.DS_Store, Thumbs.db, .vscode cache).
+//   - Block secrets by default (.env, *.pem, id_rsa). Users who want to
+//     sync config should edit .stignore and remove the specific line.
+//   - Do NOT block common source formats — code, docs, configs sync.
+//
+// If you change this list, mention it in the changelog: users who added
+// a folder under an old version keep their older (or missing) .stignore.
+const DEFAULT_STIGNORE = [
+  '// Managed by Nono CoWork — edit freely. Lines starting with "//" are comments.',
+  '// This file prevents Syncthing from pushing regenerable or sensitive',
+  '// files to the VPS. Delete a line to sync something that\'s currently',
+  '// blocked.',
+  '',
+  '// Version control',
+  '.git',
+  '.hg',
+  '.svn',
+  '',
+  '// Python',
+  '__pycache__',
+  '*.pyc',
+  '*.pyo',
+  '.venv',
+  'venv',
+  'env',
+  '.pytest_cache',
+  '.mypy_cache',
+  '.ruff_cache',
+  '.tox',
+  '*.egg-info',
+  '',
+  '// Node / JS',
+  'node_modules',
+  '.next',
+  '.nuxt',
+  '.svelte-kit',
+  '.parcel-cache',
+  'dist',
+  'build',
+  '',
+  '// Rust / Go / Java',
+  'target',
+  'out',
+  '',
+  '// Editors / IDEs',
+  '.vscode',
+  '.idea',
+  '.cursor',
+  '*.swp',
+  '*.swo',
+  '',
+  '// OS metadata',
+  '.DS_Store',
+  'Thumbs.db',
+  'desktop.ini',
+  '',
+  '// Logs & tmp',
+  '*.log',
+  '*.tmp',
+  'tmp',
+  'temp',
+  '',
+  '// Secrets (safety-first default — delete a line to opt in to syncing)',
+  '.env',
+  '.env.*',
+  '*.pem',
+  '*.key',
+  'id_rsa',
+  'id_rsa.pub',
+  'id_ed25519',
+  'id_ed25519.pub',
+  '',
+].join('\n');
+
+/**
+ * Ensure `<folderPath>/.stignore` exists. Writes the default template
+ * when it's missing; leaves any existing file alone. Returns true if it
+ * wrote a new file, false otherwise.
+ */
+function ensureDefaultStignore(folderPath) {
+  try {
+    const ignorePath = path.join(folderPath, '.stignore');
+    if (fs.existsSync(ignorePath)) return false;
+    // Make sure the folder exists first (caller should already have done
+    // this, but be defensive — the renderer can call in either order).
+    fs.mkdirSync(folderPath, { recursive: true });
+    fs.writeFileSync(ignorePath, DEFAULT_STIGNORE, 'utf8');
+    return true;
+  } catch (err) {
+    // Non-fatal: user can create their own .stignore later.
+    console.warn('[syncthing] failed to write default .stignore:', err.message);
+    return false;
+  }
+}
+
 async function addLocalSyncFolder(localPath, vpsDeviceId) {
   if (!localPath || !vpsDeviceId) {
     throw new Error('Missing localPath or vpsDeviceId');
@@ -345,13 +448,23 @@ async function addLocalSyncFolder(localPath, vpsDeviceId) {
     (f) => path.resolve(f.path) === path.resolve(localPath)
   );
   if (alreadySynced) {
+    // Even when a folder was added under a previous version (no default
+    // .stignore), give the user a one-shot fix on re-add. We never
+    // clobber an existing ignore file.
+    const wroteIgnore = ensureDefaultStignore(alreadySynced.path);
     return {
       folderId: alreadySynced.id,
       folderLabel: alreadySynced.label || alreadySynced.id,
       localPath: alreadySynced.path,
       alreadyExists: true,
+      wroteDefaultIgnore: wroteIgnore,
     };
   }
+
+  // Write the default .stignore BEFORE registering the folder with
+  // Syncthing so the very first scan already respects it. Syncthing
+  // picks up .stignore on scan, not via API.
+  const wroteIgnore = ensureDefaultStignore(localPath);
 
   await syncthingRequest('POST', '/rest/config/folders', {
     id: folderId,
@@ -363,7 +476,42 @@ async function addLocalSyncFolder(localPath, vpsDeviceId) {
     fsWatcherDelayS: 1,
   });
 
-  return { folderId, folderLabel, localPath, alreadyExists: false };
+  return {
+    folderId,
+    folderLabel,
+    localPath,
+    alreadyExists: false,
+    wroteDefaultIgnore: wroteIgnore,
+  };
+}
+
+/**
+ * Walk every local Syncthing folder and drop the default .stignore in
+ * any that don't have one yet. Used on app startup to retrofit folders
+ * created under older Nono CoWork builds that shipped no ignore list.
+ *
+ * Returns `{ checked, written, written_paths }` for logging. Never
+ * throws — best-effort — if Syncthing isn't reachable we just return
+ * zeros.
+ */
+async function ensureIgnoresForAllFolders() {
+  try {
+    const folders = await syncthingRequest('GET', '/rest/config/folders');
+    if (!Array.isArray(folders)) return { checked: 0, written: 0, written_paths: [] };
+    let written = 0;
+    const written_paths = [];
+    for (const f of folders) {
+      if (!f.path) continue;
+      if (ensureDefaultStignore(f.path)) {
+        written += 1;
+        written_paths.push(f.path);
+      }
+    }
+    return { checked: folders.length, written, written_paths };
+  } catch (err) {
+    console.warn('[syncthing] ensureIgnoresForAllFolders failed:', err.message);
+    return { checked: 0, written: 0, written_paths: [] };
+  }
 }
 
 /**
@@ -572,6 +720,19 @@ function createWindow() {
   ipcMain.handle('syncthing-add-folder', async (_event, args = {}) => {
     try {
       const result = await addLocalSyncFolder(args.localPath, args.vpsDeviceId);
+      return { success: true, ...result };
+    } catch (err) {
+      return { success: false, error: err.message };
+    }
+  });
+
+  // One-shot "retrofit .stignore onto every folder that's missing one".
+  // Cheap (one stat per folder); renderer calls it at app mount so
+  // workspaces created before we shipped default-ignore support start
+  // benefiting immediately.
+  ipcMain.handle('syncthing-ensure-ignores', async () => {
+    try {
+      const result = await ensureIgnoresForAllFolders();
       return { success: true, ...result };
     } catch (err) {
       return { success: false, error: err.message };

@@ -72,17 +72,24 @@ class WorkspaceManager:
 
     # ── Disk I/O ──
 
+    # Bump this any time we change the shape or semantics of the stored
+    # workspace records. `_load` compares it to the on-disk value and
+    # applies one-off migrations when it's lower.
+    CURRENT_SCHEMA_VERSION = 2
+
     def _load(self) -> None:
         if self._loaded:
             return
+        on_disk_version = 0
         try:
             if os.path.exists(WORKSPACES_FILE):
                 with open(WORKSPACES_FILE, "r", encoding="utf-8") as f:
                     data = json.load(f)
                 self._workspaces = list(data.get("workspaces", []))
+                on_disk_version = int(data.get("schema_version", 1))
                 logger.info(
-                    "Loaded %d workspace(s) from %s",
-                    len(self._workspaces), WORKSPACES_FILE,
+                    "Loaded %d workspace(s) from %s (schema_version=%d)",
+                    len(self._workspaces), WORKSPACES_FILE, on_disk_version,
                 )
             else:
                 self._workspaces = []
@@ -90,6 +97,34 @@ class WorkspaceManager:
         except Exception as e:
             logger.error("Failed to load workspaces.json: %s", e)
             self._workspaces = []
+
+        # One-shot migrations. Do them before declaring "loaded" so any
+        # derived state is consistent.
+        if self._workspaces and on_disk_version < 2:
+            # v1 → v2: bootstrap used to auto-promote the first Syncthing
+            # folder to `is_default=True`. That conflates "first folder I
+            # ever synced" with "safety-net default workspace", and lets
+            # users lose their delete button on a workspace they never
+            # asked to be permanent. Demote every existing default so the
+            # user goes through onboarding again and picks/creates a real
+            # default.
+            demoted = 0
+            for w in self._workspaces:
+                if w.get("is_default"):
+                    w["is_default"] = False
+                    demoted += 1
+            if demoted:
+                logger.info(
+                    "Migration v1→v2: demoted %d auto-promoted default "
+                    "workspace(s); user will be prompted to set a real default",
+                    demoted,
+                )
+            self._save_unlocked()
+        elif not self._workspaces and on_disk_version < 2:
+            # Empty file — just stamp the new version so we don't keep
+            # re-running this migration.
+            self._save_unlocked()
+
         self._loaded = True
 
     def _save_unlocked(self) -> None:
@@ -99,7 +134,10 @@ class WorkspaceManager:
             tmp_path = WORKSPACES_FILE + ".tmp"
             with open(tmp_path, "w", encoding="utf-8") as f:
                 json.dump(
-                    {"workspaces": self._workspaces},
+                    {
+                        "schema_version": self.CURRENT_SCHEMA_VERSION,
+                        "workspaces": self._workspaces,
+                    },
                     f, ensure_ascii=False, indent=2,
                 )
             os.replace(tmp_path, WORKSPACES_FILE)
@@ -134,15 +172,41 @@ class WorkspaceManager:
             return None
 
     def get_default(self) -> dict | None:
-        """Return the default workspace, or the first one if none is flagged."""
+        """Return the workspace explicitly marked `is_default=True`, or None.
+
+        Note: this is a STRICT lookup. Callers that just need "some
+        workspace to fall back to" (e.g. to anchor an orphan session)
+        should use `get_any_fallback()` instead — that one will pick a
+        non-default workspace when no real default has been set.
+        """
         with self._lock:
             self._load()
             for w in self._workspaces:
                 if w.get("is_default"):
                     return dict(w)
-            if self._workspaces:
-                return dict(self._workspaces[0])
             return None
+
+    def get_any_fallback(self) -> dict | None:
+        """Return a workspace suitable as a soft internal fallback.
+
+        Prefers the real default; otherwise picks the most-recently-active
+        workspace so orphan sessions don't crash during agent resolution.
+        This is intentionally separate from `get_default()` — the UI only
+        shows the "default" badge (and hides the delete button) for the
+        actual default.
+        """
+        with self._lock:
+            self._load()
+            for w in self._workspaces:
+                if w.get("is_default"):
+                    return dict(w)
+            if not self._workspaces:
+                return None
+            ordered = sorted(
+                self._workspaces,
+                key=lambda w: -w.get("last_active", 0),
+            )
+            return dict(ordered[0])
 
     # ── Mutations ──
 
@@ -275,6 +339,11 @@ class WorkspaceManager:
                     "id": _new_workspace_id(),
                     "label": label,
                     "folder_id": fid,
+                    # IMPORTANT: never auto-promote a bootstrapped folder
+                    # to default. "Default" is a deliberate, user-chosen
+                    # safety-net workspace; we must not steal that status
+                    # from whichever folder happens to be first in the
+                    # Syncthing config.
                     "is_default": False,
                     "created_at": now,
                     "last_active": now,
@@ -284,17 +353,6 @@ class WorkspaceManager:
                 logger.info(
                     "Bootstrapped workspace %s for existing folder %s",
                     workspace["id"], fid,
-                )
-
-            # Ensure exactly one default if we have any workspaces
-            if self._workspaces and not any(
-                w.get("is_default") for w in self._workspaces
-            ):
-                self._workspaces[0]["is_default"] = True
-                created_any = True
-                logger.info(
-                    "Promoted workspace %s to default",
-                    self._workspaces[0]["id"],
                 )
 
             if created_any:
@@ -316,14 +374,19 @@ class WorkspaceManager:
         """Given a possibly-missing session.workspace_id, return the effective workspace.
 
         - If workspace_id matches an existing workspace → return it
-        - Otherwise fall back to default workspace (or first)
+        - Otherwise fall back to the soft "any workspace" fallback
+          (default if set, else most-recently-active)
         - If no workspaces exist at all → return None
+
+        This is the data-layer resolver. The UI-level strict default
+        check (used to decide whether to show the delete button, open
+        onboarding, etc.) should use `get_default()` directly.
         """
         if workspace_id:
             w = self.get(workspace_id)
             if w:
                 return w
-        return self.get_default()
+        return self.get_any_fallback()
 
 
 # Global singleton
