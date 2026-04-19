@@ -1210,21 +1210,41 @@ async def delete_workspace(workspace_id: str):
     vps_folder_removed = False
     vps_files_removed = False
 
+    logger.info(
+        "[delete_workspace] Start: workspace=%s label=%r folder_id=%r",
+        workspace_id, ws.get("label"), folder_id,
+    )
+
     # Step 1+2: find & remove folder from VPS Syncthing, note its path.
-    if folder_id:
+    if not folder_id:
+        logger.warning(
+            "[delete_workspace] workspace %s has no folder_id — nothing to "
+            "clean up on VPS (record delete only).",
+            workspace_id,
+        )
+    else:
         try:
             st = SyncthingClient()
-            for f in st.get_folders():
+            vps_folders = st.get_folders()
+            for f in vps_folders:
                 if f.get("id") == folder_id:
                     folder_path = f.get("path")
                     break
-            if folder_path is not None:
+            if folder_path is None:
+                logger.warning(
+                    "[delete_workspace] folder_id %s not registered in VPS "
+                    "Syncthing (known folders: %s) — skipping VPS cleanup. "
+                    "Was this workspace ever pushed to VPS?",
+                    folder_id, [f.get("id") for f in vps_folders],
+                )
+            else:
                 try:
                     st._delete(f"/rest/config/folders/{folder_id}")
                     vps_folder_removed = True
                     logger.info(
-                        "[delete_workspace] Removed VPS Syncthing folder %s",
-                        folder_id,
+                        "[delete_workspace] Removed VPS Syncthing folder %s "
+                        "(was at %s)",
+                        folder_id, folder_path,
                     )
                 except Exception as e:
                     logger.error(
@@ -1244,20 +1264,27 @@ async def delete_workspace(workspace_id: str):
     # Step 3: physically delete VPS files. Only attempt after the folder
     # is unregistered from Syncthing — otherwise Syncthing would see an
     # empty folder and broadcast deletions.
-    if vps_folder_removed and folder_path and os.path.isdir(folder_path):
-        try:
-            shutil.rmtree(folder_path)
-            vps_files_removed = True
-            logger.info(
-                "[delete_workspace] Deleted VPS folder contents at %s",
+    if vps_folder_removed and folder_path:
+        if os.path.isdir(folder_path):
+            try:
+                shutil.rmtree(folder_path)
+                vps_files_removed = True
+                logger.info(
+                    "[delete_workspace] Deleted VPS folder contents at %s",
+                    folder_path,
+                )
+            except Exception as e:
+                # Don't abort the whole operation — workspace record cleanup
+                # is still worth doing. Report the partial state.
+                logger.error(
+                    "[delete_workspace] Failed to rmtree %s: %s",
+                    folder_path, e,
+                )
+        else:
+            logger.warning(
+                "[delete_workspace] Expected folder path %s does not exist "
+                "on disk — nothing to rmtree.",
                 folder_path,
-            )
-        except Exception as e:
-            # Don't abort the whole operation — workspace record cleanup
-            # is still worth doing. Report the partial state.
-            logger.error(
-                "[delete_workspace] Failed to rmtree %s: %s",
-                folder_path, e,
             )
 
     # Step 4: delete the workspace record.
