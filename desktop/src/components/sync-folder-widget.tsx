@@ -1,15 +1,11 @@
 import { useState, useEffect, useCallback, useRef } from "react";
 import { createPortal } from "react-dom";
 import {
-  FolderPlus,
   Folder,
-  Loader2,
   Check,
   X,
   RefreshCw,
   ChevronRight,
-  Settings2,
-  Trash2,
   ArrowUpFromLine,
   ArrowDownToLine,
 } from "lucide-react";
@@ -60,14 +56,6 @@ function SyncFolderIcon({ state, size = 16 }: { state: SyncIconState; size?: num
 
 // ── Types ──
 
-interface SyncedFolder {
-  id: string;
-  label: string;
-  localPath: string;
-  state: "pending" | "syncing" | "idle" | "error";
-  completion: number;
-}
-
 interface SyncFileEvent {
   path: string;
   abs_path: string;
@@ -80,11 +68,28 @@ interface SyncFileEvent {
   folder_id: string;
 }
 
+interface FolderStatus {
+  id: string;
+  label: string;
+  path: string;
+  state: "pending" | "syncing" | "idle" | "error";
+  completion: number;
+}
+
+// Minimal shape — only the bits the widget needs from the active workspace.
+// Kept loose so App.tsx can pass its WorkspaceItem directly.
+interface ActiveWorkspace {
+  id: string;
+  label: string;
+  folder_id: string | null;
+}
+
 interface SyncFolderWidgetProps {
   apiBase: string;
   getHeaders: () => Record<string, string>;
   syncState: "connected" | "syncing" | "disconnected" | "loading";
-  vpsDeviceId: string;
+  /** The workspace whose folder we should show — usually the active chat's workspace. */
+  activeWorkspace: ActiveWorkspace | null;
 }
 
 // ── File sync row ──
@@ -96,7 +101,7 @@ function FileSyncRow({ evt }: { evt: SyncFileEvent }) {
   //   inbound  = "from you" (user → VPS)   → ↑ (sending up)
   //   outbound = "to you"   (VPS → user)   → ↓ (receiving down)
   const DirectionIcon = evt.direction === "inbound" ? ArrowUpFromLine : ArrowDownToLine;
-  const directionColor = evt.direction === "inbound" ? "#A8A6A4" : "#A8A6A4";
+  const directionColor = "#A8A6A4";
 
   // Progress may be null even when syncing (transfer not yet reported);
   // render ellipsis in that case instead of a bogus percentage.
@@ -161,24 +166,27 @@ function FileSyncRow({ evt }: { evt: SyncFileEvent }) {
 }
 
 // ── Component ──
+//
+// Workspace-as-project model (post-refactor): each workspace is bound 1:1 to
+// one Syncthing folder. The widget no longer adds/removes folders — that's
+// handled by the workspace create/delete flows in the sidebar. Here we only
+// surface sync status for the active workspace's folder.
 
 export function SyncFolderWidget({
   apiBase,
   getHeaders,
   syncState,
-  vpsDeviceId,
+  activeWorkspace,
 }: SyncFolderWidgetProps) {
-  const [folders, setFolders] = useState<SyncedFolder[]>([]);
+  const [folderStatus, setFolderStatus] = useState<FolderStatus | null>(null);
   const [syncEvents, setSyncEvents] = useState<SyncFileEvent[]>([]);
   const [totalSyncing, setTotalSyncing] = useState(0);
-  const [isAdding, setIsAdding] = useState(false);
   const [showPanel, setShowPanel] = useState(false);
   const [panelPos, setPanelPos] = useState({ bottom: 0, left: 0 });
   const buttonRef = useRef<HTMLButtonElement>(null);
   const panelRef = useRef<HTMLDivElement>(null);
 
-  // Currently selected folder (first in list, or null)
-  const selectedFolder = folders[0] || null;
+  const folderId = activeWorkspace?.folder_id || null;
 
   // Recalculate panel position whenever it opens
   useEffect(() => {
@@ -203,43 +211,48 @@ export function SyncFolderWidget({
     return () => document.removeEventListener("mousedown", handler);
   }, [showPanel]);
 
-  // Poll folder status from VPS
+  // Poll folder status for just the active workspace's folder.
   const fetchFolderStatus = useCallback(async () => {
+    if (!folderId) {
+      setFolderStatus(null);
+      return;
+    }
     try {
       const res = await fetch(`${apiBase}/api/sync/folders`, {
         headers: getHeaders(),
       });
       if (!res.ok) return;
       const data = await res.json();
-
-      // Only show folders with nono- prefix (user-created sync folders)
-      const nonoFolders = (data.folders || []).filter(
-        (f: any) => f.id.startsWith("nono-")
-      );
-
-      setFolders((prev) => {
-        return nonoFolders.map((f: any) => {
-          const existing = prev.find((p) => p.id === f.id);
-          return {
-            id: f.id,
-            label: f.label,
-            localPath: existing?.localPath || f.path,
-            state: f.state === "idle" ? "idle" : f.state === "error" ? "error" : "syncing",
-            completion: f.completion ?? 100,
-          };
-        });
+      const match = (data.folders || []).find((f: any) => f.id === folderId);
+      if (!match) {
+        setFolderStatus(null);
+        return;
+      }
+      setFolderStatus({
+        id: match.id,
+        label: match.label,
+        path: match.path || "",
+        state: match.state === "idle" ? "idle"
+          : match.state === "error" ? "error"
+          : match.state === "pending" ? "pending"
+          : "syncing",
+        completion: match.completion ?? 100,
       });
     } catch {
-      // Silently fail — will retry on next poll
+      // Silently fail — retry on next poll
     }
-  }, [apiBase, getHeaders]);
+  }, [apiBase, getHeaders, folderId]);
 
-  // Fetch real file-level sync events from backend
+  // Fetch recent sync events scoped to this workspace's folder.
   const fetchSyncEvents = useCallback(async () => {
+    if (!folderId) {
+      setSyncEvents([]);
+      setTotalSyncing(0);
+      return;
+    }
     try {
-      const res = await fetch(`${apiBase}/api/sync/events?minutes=30&limit=10`, {
-        headers: getHeaders(),
-      });
+      const url = `${apiBase}/api/sync/events?minutes=30&limit=10&folder_id=${encodeURIComponent(folderId)}`;
+      const res = await fetch(url, { headers: getHeaders() });
       if (!res.ok) return;
       const data = await res.json();
       setSyncEvents(data.events || []);
@@ -247,107 +260,24 @@ export function SyncFolderWidget({
     } catch {
       // Silently fail
     }
-  }, [apiBase, getHeaders]);
+  }, [apiBase, getHeaders, folderId]);
 
-  // Poll every 5s when panel is open or we have syncing folders
+  // Poll every 3s while active, 10s when idle. Resets when workspace switches.
   useEffect(() => {
     fetchFolderStatus();
     fetchSyncEvents();
-    const hasSyncing = folders.some((f) => f.state === "syncing" || f.state === "pending");
+    const isBusy = folderStatus?.state === "syncing" || folderStatus?.state === "pending";
     const interval = setInterval(() => {
       fetchFolderStatus();
-      if (showPanel || hasSyncing) fetchSyncEvents();
-    }, hasSyncing ? 3000 : 10000);
+      if (showPanel || isBusy) fetchSyncEvents();
+    }, isBusy ? 3000 : 10000);
     return () => clearInterval(interval);
-  }, [fetchFolderStatus, fetchSyncEvents, showPanel, folders.some((f) => f.state === "syncing" || f.state === "pending")]);
+  }, [fetchFolderStatus, fetchSyncEvents, showPanel, folderStatus?.state, folderId]);
 
   // Refresh sync events when panel opens
   useEffect(() => {
     if (showPanel) fetchSyncEvents();
   }, [showPanel, fetchSyncEvents]);
-
-  // ── Add folder flow ──
-  const handleAddFolder = useCallback(async () => {
-    const electron = window.electronAPI;
-    if (!electron?.dialogSelectFolder || !electron?.syncthingAddFolder) return;
-    if (isAdding) return;
-
-    setIsAdding(true);
-    try {
-      // Step 1: Open system folder picker
-      const pick = await electron.dialogSelectFolder();
-      if (!pick.success || !pick.path) return;
-
-      const localPath = pick.path;
-      const folderName = localPath.split(/[/\\]/).pop() || "Shared";
-
-      // Step 2: Add folder to local Syncthing
-      const addResult = await electron.syncthingAddFolder({
-        localPath,
-        vpsDeviceId,
-      });
-      if (!addResult.success) return;
-
-      const folderId = addResult.folderId;
-      const folderLabel = addResult.folderLabel || folderName;
-
-      // Optimistically add to UI
-      if (!addResult.alreadyExists) {
-        setFolders((prev) => [
-          ...prev,
-          {
-            id: folderId,
-            label: folderLabel,
-            localPath,
-            state: "pending",
-            completion: 0,
-          },
-        ]);
-        setShowPanel(true);
-      }
-
-      // Step 3: Tell VPS to create matching receive folder
-      const desktopDevice = await electron.syncthingLocalDevice?.();
-      await fetch(`${apiBase}/api/sync/folders`, {
-        method: "POST",
-        headers: { ...getHeaders(), "Content-Type": "application/json" },
-        body: JSON.stringify({
-          folder_id: folderId,
-          folder_label: folderLabel,
-          desktop_device_id: desktopDevice?.deviceId || "",
-        }),
-      });
-
-      // Start polling for status
-      fetchFolderStatus();
-    } catch {
-      // Silent — best effort
-    } finally {
-      setIsAdding(false);
-    }
-  }, [apiBase, getHeaders, vpsDeviceId, isAdding, fetchFolderStatus]);
-
-  // ── Remove folder flow ──
-  const handleRemoveFolder = useCallback(async (folderId: string) => {
-    const electron = window.electronAPI;
-    if (!electron?.syncthingRemoveFolder) return;
-
-    // Optimistic UI removal
-    setFolders((prev) => prev.filter((f) => f.id !== folderId));
-
-    try {
-      // Remove from local desktop Syncthing
-      await electron.syncthingRemoveFolder({ folderId });
-      // Mirror the removal on the VPS side so it doesn't keep re-announcing
-      await fetch(`${apiBase}/api/sync/folders/${folderId}`, {
-        method: "DELETE",
-        headers: getHeaders(),
-      });
-    } catch {
-      // On failure, refresh from server to resync UI state
-      fetchFolderStatus();
-    }
-  }, [apiBase, getHeaders, fetchFolderStatus]);
 
   const isDisconnected = syncState === "disconnected" || syncState === "loading";
   const hasElectron = !!window.electronAPI?.dialogSelectFolder;
@@ -355,31 +285,40 @@ export function SyncFolderWidget({
   // Don't show the button at all if not in Electron
   if (!hasElectron) return null;
 
-  // Format path for display
-  const displayPath = selectedFolder?.localPath || "";
+  // No active workspace → nothing meaningful to show. Hide the pill entirely
+  // so the prompt footer doesn't carry a ghost control.
+  if (!activeWorkspace) return null;
 
-  // Derive pill icon state from folders + sync events
+  // Derive pill icon state from folder + events
   const pillIconState: SyncIconState = (() => {
-    // Any folder or file with an error → error
-    const hasError = folders.some((f) => f.state === "error")
-      || syncEvents.some((e) => e.state === "error");
-    if (hasError) return "error";
-    // Any folder syncing/pending → syncing
-    const hasSyncing = folders.some((f) => f.state === "syncing" || f.state === "pending")
-      || syncEvents.some((e) => e.state === "syncing")
-      || totalSyncing > 0;
-    if (hasSyncing) return "syncing";
+    if (folderStatus?.state === "error" || syncEvents.some((e) => e.state === "error")) {
+      return "error";
+    }
+    if (
+      folderStatus?.state === "syncing" ||
+      folderStatus?.state === "pending" ||
+      syncEvents.some((e) => e.state === "syncing") ||
+      totalSyncing > 0
+    ) {
+      return "syncing";
+    }
     return "idle";
   })();
 
-  // Chronological mixed list. Events from backend are already sorted by
-  // timestamp desc; cap at 6 rows so the panel stays compact.
+  const displayLabel = folderStatus?.label || activeWorkspace.label;
+  const displayPath = folderStatus?.path || "";
+
+  // Chronological mixed list — cap at 6 rows for a compact panel.
   const displayedEvents = syncEvents.slice(0, 6);
   const hasEvents = displayedEvents.length > 0;
+  const barPct = Math.max(0, Math.min(100, folderStatus?.completion ?? 0));
+  const barColor = folderStatus?.state === "error" ? "#D14343"
+    : folderStatus?.state === "idle" ? "#15A362"
+    : "#0B57D0";
 
   return (
     <>
-      {/* folder-selector-pop panel via portal */}
+      {/* folder-status-pop panel via portal */}
       {showPanel && createPortal(
         <div
           ref={panelRef}
@@ -398,167 +337,93 @@ export function SyncFolderWidget({
               gap: 10,
             }}
           >
-            {/* ── Recent folders section ── */}
-            <div style={{ display: "flex", flexDirection: "column", gap: 4, paddingBottom: 8 }}>
-              <div style={{ padding: "4px 8px" }}>
+            {/* ── Workspace folder header ── */}
+            <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+              <div style={{ padding: "0 2px" }}>
                 <span style={{ fontSize: 11, fontWeight: 600, color: "#8A8886", fontFamily: "Inter, sans-serif" }}>
-                  Recent
+                  Workspace folder
                 </span>
               </div>
-
-              {/* Folder items */}
-              {folders.map((f) => {
-                const barColor = f.state === "error" ? "#D14343"
-                  : f.state === "idle" ? "#15A362"
-                  : "#0B57D0";
-                const barPct = Math.max(0, Math.min(100, f.completion ?? 0));
-                return (
-                  <div
-                    key={f.id}
-                    className="group transition-colors hover:bg-[#F7F6F5]"
-                    style={{
-                      padding: "6px 8px",
-                      borderRadius: 6,
-                      display: "flex",
-                      flexDirection: "column",
-                      gap: 4,
-                    }}
-                  >
-                    <div
+              <div
+                style={{
+                  padding: "6px 8px",
+                  borderRadius: 6,
+                  background: "#F7F6F5",
+                  display: "flex",
+                  flexDirection: "column",
+                  gap: 4,
+                }}
+              >
+                <div style={{ display: "flex", alignItems: "center", gap: 10, minWidth: 0 }}>
+                  <Folder size={16} style={{ color: "#333333", flexShrink: 0 }} />
+                  <div style={{ display: "flex", flexDirection: "column", gap: 2, minWidth: 0, flex: 1 }}>
+                    <span
                       style={{
-                        display: "flex",
-                        alignItems: "center",
-                        justifyContent: "space-between",
-                        gap: 8,
+                        fontSize: 13,
+                        color: "#333333",
+                        fontFamily: "Inter, sans-serif",
+                        overflow: "hidden",
+                        textOverflow: "ellipsis",
+                        whiteSpace: "nowrap",
                       }}
                     >
-                      <div style={{ display: "flex", alignItems: "center", gap: 12, minWidth: 0, flex: 1 }}>
-                        <Folder size={16} style={{ color: "#333333", flexShrink: 0 }} />
-                        <div style={{ display: "flex", flexDirection: "column", gap: 2, minWidth: 0 }}>
-                          <span
-                            style={{
-                              fontSize: 13,
-                              color: "#333333",
-                              fontFamily: "Inter, sans-serif",
-                              overflow: "hidden",
-                              textOverflow: "ellipsis",
-                              whiteSpace: "nowrap",
-                            }}
-                          >
-                            {f.label}
-                          </span>
-                          <span
-                            style={{
-                              fontSize: 11,
-                              color: "#8A8886",
-                              fontFamily: "Inter, sans-serif",
-                              overflow: "hidden",
-                              textOverflow: "ellipsis",
-                              whiteSpace: "nowrap",
-                            }}
-                          >
-                            {f.localPath}
-                          </span>
-                        </div>
-                      </div>
-                      <div style={{ display: "flex", alignItems: "center", gap: 6, flexShrink: 0 }}>
-                        {f.state !== "idle" && (
-                          <span style={{ fontSize: 11, color: "#8A8886", fontFamily: "Inter, sans-serif", minWidth: 32, textAlign: "right" }}>
-                            {Math.round(barPct)}%
-                          </span>
-                        )}
-                        {f.id === selectedFolder?.id && (
-                          <Check size={14} style={{ color: "#0B57D0", flexShrink: 0 }} />
-                        )}
-                        <button
-                          type="button"
-                          aria-label="Remove synced folder"
-                          onClick={(e) => {
-                            e.stopPropagation();
-                            handleRemoveFolder(f.id);
-                          }}
-                          className="opacity-0 group-hover:opacity-60 hover:!opacity-100 transition-opacity"
-                          style={{
-                            border: "none",
-                            background: "transparent",
-                            padding: 2,
-                            cursor: "pointer",
-                            display: "flex",
-                            alignItems: "center",
-                          }}
-                        >
-                          <Trash2 size={14} style={{ color: "#8A8886" }} />
-                        </button>
-                      </div>
-                    </div>
-                    {/* Per-folder progress bar — only shown while not idle */}
-                    {f.state !== "idle" && (
-                      <div style={{ height: 2, borderRadius: 1, background: "#F0EEEC", overflow: "hidden" }}>
-                        <div
-                          style={{
-                            height: "100%",
-                            width: `${barPct}%`,
-                            background: barColor,
-                            transition: "width 0.3s ease",
-                          }}
-                        />
-                      </div>
+                      {displayLabel}
+                    </span>
+                    {displayPath && (
+                      <span
+                        style={{
+                          fontSize: 11,
+                          color: "#8A8886",
+                          fontFamily: "Inter, sans-serif",
+                          overflow: "hidden",
+                          textOverflow: "ellipsis",
+                          whiteSpace: "nowrap",
+                        }}
+                        title={displayPath}
+                      >
+                        {displayPath}
+                      </span>
                     )}
                   </div>
-                );
-              })}
-
-              {/* No folders yet */}
-              {folders.length === 0 && (
-                <div style={{ padding: "6px 8px" }}>
-                  <span style={{ fontSize: 12, color: "#A8A6A4", fontFamily: "Inter, sans-serif" }}>
-                    No synced folders yet
-                  </span>
+                  {folderStatus && folderStatus.state !== "idle" && (
+                    <span
+                      style={{
+                        fontSize: 11,
+                        color: "#8A8886",
+                        fontFamily: "Inter, sans-serif",
+                        minWidth: 32,
+                        textAlign: "right",
+                        flexShrink: 0,
+                      }}
+                    >
+                      {Math.round(barPct)}%
+                    </span>
+                  )}
                 </div>
-              )}
-
-              {/* Choose a different folder */}
-              <button
-                type="button"
-                className="w-full text-left transition-colors hover:bg-[#F7F6F5]"
-                style={{
-                  display: "flex",
-                  alignItems: "center",
-                  gap: 12,
-                  padding: 8,
-                  borderRadius: 6,
-                  border: "none",
-                  background: "transparent",
-                  cursor: isAdding || isDisconnected ? "not-allowed" : "pointer",
-                  opacity: isAdding || isDisconnected ? 0.4 : 1,
-                }}
-                onClick={handleAddFolder}
-                disabled={isAdding || isDisconnected}
-              >
-                {isAdding ? (
-                  <Loader2 size={16} className="animate-spin" style={{ color: "#333333", flexShrink: 0 }} />
-                ) : (
-                  <FolderPlus size={16} style={{ color: "#333333", flexShrink: 0 }} />
+                {folderStatus && folderStatus.state !== "idle" && (
+                  <div style={{ height: 2, borderRadius: 1, background: "#F0EEEC", overflow: "hidden" }}>
+                    <div
+                      style={{
+                        height: "100%",
+                        width: `${barPct}%`,
+                        background: barColor,
+                        transition: "width 0.3s ease",
+                      }}
+                    />
+                  </div>
                 )}
-                <span style={{ fontSize: 13, color: "#333333", fontFamily: "Inter, sans-serif" }}>
-                  Choose a different folder
-                </span>
-              </button>
-
-              {/* Divider */}
-              <div style={{ height: 1, width: "100%", background: "#F7F6F5" }} />
+              </div>
             </div>
+
+            {/* Divider */}
+            <div style={{ height: 1, width: "100%", background: "#F7F6F5" }} />
 
             {/* ── File Sync Status section ── */}
             <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", width: "100%" }}>
               <span style={{ fontSize: 11, fontWeight: 600, color: "#8A8886", fontFamily: "Inter, sans-serif" }}>
                 File Sync Status
               </span>
-              <Settings2 size={12} style={{ color: "#A8A6A4", cursor: "pointer" }} />
             </div>
-
-            {/* Divider */}
-            <div style={{ height: 1, width: "100%", background: "#F7F6F5" }} />
 
             {/* File sync rows — chronological mixed list, per-row ↑/↓ arrow */}
             {hasEvents ? (
@@ -612,47 +477,45 @@ export function SyncFolderWidget({
       <button
         type="button"
         ref={buttonRef}
-        onClick={selectedFolder ? () => setShowPanel((v) => !v) : handleAddFolder}
-        disabled={isAdding || isDisconnected}
+        onClick={() => setShowPanel((v) => !v)}
+        disabled={isDisconnected}
         className="flex items-center gap-1.5 transition-colors rounded-md hover:bg-muted disabled:opacity-30 disabled:cursor-not-allowed cursor-pointer"
         style={{
           padding: "4px 8px",
           border: "none",
           background: "transparent",
         }}
+        title={displayPath || displayLabel}
       >
-        {isAdding ? (
-          <Loader2 size={16} className="animate-spin" style={{ color: "#5A5856" }} />
-        ) : selectedFolder ? (
-          <SyncFolderIcon state={pillIconState} size={16} />
-        ) : (
-          <Folder size={16} style={{ color: "#A8A6A4" }} />
-        )}
-        {selectedFolder ? (
-          <>
-            <span style={{ fontSize: 12, fontWeight: 600, color: "#5A5856", fontFamily: "Inter, sans-serif" }}>
-              {displayPath}
-            </span>
-            {totalSyncing > 0 && (
-              <span
-                style={{
-                  fontSize: 10,
-                  fontWeight: 600,
-                  color: "#FFFFFF",
-                  background: "#0B57D0",
-                  padding: "1px 6px",
-                  borderRadius: 10,
-                  fontFamily: "Inter, sans-serif",
-                  lineHeight: 1.4,
-                }}
-              >
-                {totalSyncing}
-              </span>
-            )}
-          </>
-        ) : (
-          <span style={{ fontSize: 12, fontWeight: 600, color: "#5A5856", fontFamily: "Inter, sans-serif" }}>
-            Sync folder
+        <SyncFolderIcon state={pillIconState} size={16} />
+        <span
+          style={{
+            fontSize: 12,
+            fontWeight: 600,
+            color: "#5A5856",
+            fontFamily: "Inter, sans-serif",
+            maxWidth: 160,
+            overflow: "hidden",
+            textOverflow: "ellipsis",
+            whiteSpace: "nowrap",
+          }}
+        >
+          {displayLabel}
+        </span>
+        {totalSyncing > 0 && (
+          <span
+            style={{
+              fontSize: 10,
+              fontWeight: 600,
+              color: "#FFFFFF",
+              background: "#0B57D0",
+              padding: "1px 6px",
+              borderRadius: 10,
+              fontFamily: "Inter, sans-serif",
+              lineHeight: 1.4,
+            }}
+          >
+            {totalSyncing}
           </span>
         )}
       </button>

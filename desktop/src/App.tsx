@@ -756,6 +756,12 @@ function App() {
   const [workspaceList, setWorkspaceList] = useState<WorkspaceItem[]>([]);
   const [activeWorkspaceId, setActiveWorkspaceId] = useState<string | null>(null);
   const [newWorkspaceOpen, setNewWorkspaceOpen] = useState(false);
+  // Resolve the active workspace record (fallback to default if unset) so the
+  // sync widget and other workspace-scoped UI can bind to a concrete folder.
+  const activeWorkspace =
+    workspaceList.find((w) => w.id === activeWorkspaceId) ||
+    workspaceList.find((w) => w.is_default) ||
+    null;
   const [availableModels, setAvailableModels] = useState<AvailableModels>([]);
   const [modelSelectorOpen, setModelSelectorOpen] = useState(false);
   // Track whether a stop request has been sent (for immediate UI feedback)
@@ -1585,7 +1591,7 @@ function App() {
                           apiBase={API_BASE}
                           getHeaders={() => authHeaders()}
                           syncState={syncState}
-                          vpsDeviceId={syncStatus?.device_id || ""}
+                          activeWorkspace={activeWorkspace}
                         />
                         {/* Model Selector */}
                         <ModelSelector open={modelSelectorOpen} onOpenChange={(open) => {
@@ -1868,7 +1874,7 @@ function App() {
                           apiBase={API_BASE}
                           getHeaders={() => authHeaders()}
                           syncState={syncState}
-                          vpsDeviceId={syncStatus?.device_id || ""}
+                          activeWorkspace={activeWorkspace}
                         />
                         {/* Model Selector */}
                         <ModelSelector open={modelSelectorOpen} onOpenChange={(open) => {
