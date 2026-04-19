@@ -106,6 +106,28 @@ class SyncEventBuffer:
                     return e
         return None
 
+    def mark_folder_all_done(self, folder_id: str) -> int:
+        """Mark every still-pending event in a folder as synced — both directions.
+
+        Used as a self-healing reconcile step when Syncthing reports the
+        folder as truly idle (state=idle, needFiles=0, needBytes=0). The
+        per-event transitions (ItemFinished, FolderCompletion, etc.) are
+        best-effort — under race conditions or path-encoding mismatches
+        an event can stay `synced=False` indefinitely. This method trusts
+        the folder-level ground truth over per-event state.
+
+        Returns the number of events patched.
+        """
+        patched = 0
+        with self._lock:
+            for e in self._events:
+                if e.folder_id == folder_id and not e.synced:
+                    e.synced = True
+                    if e.progress != 100:
+                        e.progress = 100
+                    patched += 1
+        return patched
+
     def mark_outbound_folder_done(self, folder_id: str) -> int:
         """Mark all still-pending outbound events in a folder as synced.
 

@@ -1595,6 +1595,42 @@ async def list_sync_events(
     if not buffer:
         return {"events": [], "total_syncing": 0}
 
+    # Self-healing reconcile: if Syncthing says the folder is truly idle
+    # (state=idle + no need-items/bytes), any event still marked `syncing`
+    # in our buffer is stale. Per-event transitions (ItemFinished,
+    # FolderCompletion) are best-effort — a missed or path-mismatched
+    # event can strand a file as "syncing" forever. Trust folder-level
+    # ground truth over per-event state.
+    try:
+        from tools.syncthing import SyncthingClient as _St
+        _st = _St()
+        _reconcile_folders = (
+            [{"id": target_folder_id}] if target_folder_id
+            else _st.get_folders()
+        )
+        for _f in _reconcile_folders:
+            _fid = _f.get("id")
+            if not _fid:
+                continue
+            try:
+                _fs = _st.get_folder_status(_fid)
+            except Exception:
+                continue
+            if (
+                _fs.get("state") == "idle"
+                and _fs.get("needFiles", 0) == 0
+                and _fs.get("needBytes", 0) == 0
+                and _fs.get("needDeletes", 0) == 0
+            ):
+                _n = buffer.mark_folder_all_done(_fid)
+                if _n:
+                    logger.info(
+                        "[sync-events] Reconciled %d stale 'syncing' event(s) "
+                        "in idle folder %s", _n, _fid,
+                    )
+    except Exception as _e:
+        logger.debug("[sync-events] reconcile skipped: %s", _e)
+
     # Over-fetch so we still have `limit` matches after folder filtering
     fetch_limit = limit if not target_folder_id else max(limit * 3, 60)
     recent = buffer.get_recent(minutes=minutes, limit=fetch_limit)
