@@ -546,6 +546,28 @@ function createWindow() {
     return { success: true, path: result.filePaths[0] };
   });
 
+  // Return the user's home directory (used by onboarding to suggest a
+  // default workspace at ~/Nono-Workspace).
+  ipcMain.handle('get-home-dir', async () => {
+    return { success: true, path: os.homedir() };
+  });
+
+  // Ensure a directory exists (mkdir -p). Used during default-workspace
+  // onboarding so the chosen path is guaranteed to exist before Syncthing
+  // picks it up.
+  ipcMain.handle('ensure-dir', async (_event, args = {}) => {
+    try {
+      const dirPath = args && args.path;
+      if (!dirPath || typeof dirPath !== 'string') {
+        return { success: false, error: 'path is required' };
+      }
+      fs.mkdirSync(dirPath, { recursive: true });
+      return { success: true, path: dirPath };
+    } catch (err) {
+      return { success: false, error: err.message };
+    }
+  });
+
   // Add a local folder to Syncthing, shared with VPS
   ipcMain.handle('syncthing-add-folder', async (_event, args = {}) => {
     try {

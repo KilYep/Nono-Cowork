@@ -47,6 +47,9 @@ declare global {
       syncthingRemoveFolder: (args: {
         folderId: string;
       }) => Promise<{ success: boolean; error?: string }>;
+      // Onboarding helpers for default workspace
+      getHomeDir: () => Promise<{ success: boolean; path?: string; error?: string }>;
+      ensureDir: (dirPath: string) => Promise<{ success: boolean; path?: string; error?: string }>;
       getAppConfig: () => Promise<Record<string, string>>;
       saveAppConfig: (config: Record<string, string>) => Promise<{ success: boolean }>;
       reloadWindow: () => Promise<{ success: boolean }>;
@@ -91,6 +94,7 @@ import { SearchToolCall } from "@/components/ai-elements/search-tool";
 import { useScrollAnchor } from "@/components/ai-elements/use-scroll-anchor";
 import { Sidebar, type SessionItem, type SidebarView, type WorkspaceItem } from "@/components/sidebar";
 import { NewWorkspaceDialog } from "@/components/new-workspace-dialog";
+import { OnboardingDialog } from "@/components/onboarding-dialog";
 import { type Notification, type Deliverable } from "@/components/notification-card";
 import { WorkspacePage } from "@/components/workspace-page";
 import { RoutinesPage } from "@/components/routines-page";
@@ -756,6 +760,12 @@ function App() {
   const [workspaceList, setWorkspaceList] = useState<WorkspaceItem[]>([]);
   const [activeWorkspaceId, setActiveWorkspaceId] = useState<string | null>(null);
   const [newWorkspaceOpen, setNewWorkspaceOpen] = useState(false);
+  const [onboardingOpen, setOnboardingOpen] = useState(false);
+  // Don't re-open the onboarding dialog after the user has dismissed it
+  // during this app lifetime; they can still create a workspace via the
+  // sidebar's `+ New Workspace` button.
+  const [onboardingDismissed, setOnboardingDismissed] = useState(false);
+  const [workspacesLoaded, setWorkspacesLoaded] = useState(false);
   // Resolve the active workspace record (fallback to default if unset) so the
   // sync widget and other workspace-scoped UI can bind to a concrete folder.
   const activeWorkspace =
@@ -932,6 +942,8 @@ function App() {
       }
     } catch {
       // ignore
+    } finally {
+      setWorkspacesLoaded(true);
     }
   }, []);
 
@@ -1104,6 +1116,19 @@ function App() {
       return false;
     }
   }, [fetchNotifications]);
+
+  // First-launch onboarding: when workspaces have loaded, the list is empty,
+  // sync is connected, and the user hasn't already dismissed it this run.
+  // We do NOT force it — the X/Escape still closes the dialog; the user can
+  // come back via `+ New Workspace` in the sidebar.
+  useEffect(() => {
+    if (!workspacesLoaded) return;
+    if (onboardingDismissed) return;
+    if (workspaceList.length > 0) return;
+    if (syncState !== "connected") return;
+    if (!syncStatus?.device_id) return;
+    setOnboardingOpen(true);
+  }, [workspacesLoaded, onboardingDismissed, workspaceList.length, syncState, syncStatus?.device_id]);
 
   // Load session list, models, workspaces, and notifications on mount
   useEffect(() => {
@@ -2000,6 +2025,39 @@ function App() {
       apiBase={API_BASE}
       apiToken={API_TOKEN}
       syncState={syncState}
+    />
+    <OnboardingDialog
+      open={onboardingOpen}
+      onClose={() => {
+        setOnboardingOpen(false);
+        setOnboardingDismissed(true);
+      }}
+      apiBase={API_BASE}
+      getHeaders={() => authHeaders()}
+      vpsDeviceId={syncStatus?.device_id || ""}
+      onCreated={(wsId) => {
+        setActiveWorkspaceId(wsId);
+        setActiveView("chat");
+        setMessages([]);
+        setIsStopping(false);
+        setCurrentSessionId(null);
+        setOnboardingOpen(false);
+        setOnboardingDismissed(true);
+        fetchWorkspaces();
+        // Start a fresh chat in this brand-new default workspace.
+        fetch(`${API_BASE}/api/sessions`, {
+          method: "POST",
+          headers: authHeaders({ "Content-Type": "application/json" }),
+          body: JSON.stringify({ workspace_id: wsId }),
+        })
+          .then((r) => r.json())
+          .then((data) => {
+            if (data.session_id) setCurrentSessionId(data.session_id);
+            refreshStatus();
+            fetchSessions();
+          })
+          .catch(() => {});
+      }}
     />
     <NewWorkspaceDialog
       open={newWorkspaceOpen}
