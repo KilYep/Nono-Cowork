@@ -77,17 +77,6 @@ def main():
     from integrations.syncthing_watcher import start_watcher as start_sync_watcher
     start_sync_watcher()
 
-    # One-shot idempotent VPS path migration: SyncFromLocal/ → NonoWorkspaces/.
-    # Also self-heals any folder whose on-disk path was deleted manually
-    # (Syncthing would otherwise report "folder path missing" forever).
-    # Must run BEFORE bootstrap so workspace records see the new paths.
-    try:
-        from channels.desktop import migrate_vps_sync_paths
-        _mig = migrate_vps_sync_paths()
-        logger.info("VPS path migration: %s", _mig)
-    except Exception as e:
-        logger.warning("VPS path migration failed: %s", e)
-
     # Bootstrap workspaces: wrap every existing Syncthing folder in a
     # workspace record (idempotent). Runs after the watcher so the
     # Syncthing API is warmed up.

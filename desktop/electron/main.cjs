@@ -732,7 +732,7 @@ function createWindow() {
   });
 
   // Return the user's home directory (used by onboarding to suggest a
-  // default workspace at ~/Nono-Workspace).
+  // default workspace at ~/Nono Workspace).
   ipcMain.handle('get-home-dir', async () => {
     return { success: true, path: os.homedir() };
   });

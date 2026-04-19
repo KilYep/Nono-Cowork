@@ -3,7 +3,7 @@ import { createPortal } from "react-dom";
 import { FolderHeart, FolderSearch, Loader2, X } from "lucide-react";
 
 // Onboarding dialog for first-launch. Shown when the user has zero
-// workspaces — they choose between a one-click default (~/Nono-Workspace)
+// workspaces — they choose between a one-click default (~/Nono Workspace)
 // or picking their own folder.
 //
 // Both paths converge on the same create flow used by NewWorkspaceDialog:
@@ -12,7 +12,7 @@ import { FolderHeart, FolderSearch, Loader2, X } from "lucide-react";
 //   3) POST /api/sync/folders          → VPS creates receive folder, wraps as workspace
 //   4) PATCH /api/workspaces/:id       → mark as default
 
-const DEFAULT_FOLDER_NAME = "Nono-Workspace";
+const DEFAULT_FOLDER_NAME = "Nono Workspace";
 
 interface OnboardingDialogProps {
   open: boolean;
