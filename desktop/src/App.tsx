@@ -2177,18 +2177,22 @@ function App() {
       description={
         pendingConfirm?.kind === "delete-workspace" ? (
           <>
+            <p style={{ margin: 0 }}>This will permanently:</p>
+            <ul style={{ margin: "4px 0 0 18px", padding: 0 }}>
+              <li>Stop syncing this folder</li>
+              <li>Remove the folder from both this device and the VPS</li>
+              <li>Delete all synced files from the VPS</li>
+            </ul>
             {pendingConfirm.sessionCount > 0 ? (
-              <p style={{ margin: 0 }}>
+              <p style={{ margin: "6px 0 0" }}>
                 <strong>{pendingConfirm.sessionCount}</strong>
                 {pendingConfirm.sessionCount === 1 ? " chat" : " chats"} in
                 this workspace will fall back to your default workspace —
                 the chats themselves won't be deleted.
               </p>
-            ) : (
-              <p style={{ margin: 0 }}>This workspace has no chats.</p>
-            )}
+            ) : null}
             <p style={{ margin: "6px 0 0", color: "#8A8886" }}>
-              The underlying Syncthing folder is not touched by this action.
+              Your local files will NOT be touched. This cannot be undone.
             </p>
           </>
         ) : pendingConfirm?.kind === "delete-session" ? (
@@ -2211,21 +2215,59 @@ function App() {
           const { wsId, label } = pendingConfirm;
           setPendingConfirm({ ...pendingConfirm, busy: true });
           try {
+            // Step A: backend nukes VPS side (Syncthing config + files)
+            // and deletes the workspace record. Returns the folder_id so
+            // we can finish up on the local Syncthing side.
             const res = await fetch(`${API_BASE}/api/workspaces/${wsId}`, {
               method: "DELETE",
               headers: authHeaders(),
             });
-            if (res.ok) {
-              if (activeWorkspaceId === wsId) setActiveWorkspaceId(null);
-              fetchWorkspaces();
-              fetchSessions();
-              toast.success(`Deleted workspace "${label}"`);
-              setPendingConfirm(null);
-            } else {
+            if (!res.ok) {
               const err = await res.json().catch(() => ({ error: "delete failed" }));
               toast.error(err.error || `Could not delete workspace (HTTP ${res.status})`);
               setPendingConfirm({ ...pendingConfirm, busy: false });
+              return;
             }
+            const payload: {
+              folder_id?: string | null;
+              vps_folder_removed?: boolean;
+              vps_files_removed?: boolean;
+              vps_folder_path?: string | null;
+            } = await res.json().catch(() => ({}));
+
+            // Step B: remove the folder from local Syncthing config so
+            // this device stops broadcasting a folder the VPS no longer
+            // knows about. Local files are untouched (Syncthing never
+            // deletes files it was just told to forget).
+            if (payload.folder_id && window.electronAPI?.syncthingRemoveFolder) {
+              try {
+                await window.electronAPI.syncthingRemoveFolder({
+                  folderId: payload.folder_id,
+                });
+              } catch {
+                // Non-fatal: the workspace is already gone; a stale local
+                // folder config will just show as "unshared". Log via toast.
+                toast.warning(
+                  "Workspace deleted, but local Syncthing folder could not be removed. " +
+                  "You can remove it manually from Settings.",
+                );
+              }
+            }
+
+            if (activeWorkspaceId === wsId) setActiveWorkspaceId(null);
+            fetchWorkspaces();
+            fetchSessions();
+
+            // Honest success message: tell the user exactly what got nuked.
+            const vpsOk = payload.vps_folder_removed && payload.vps_files_removed;
+            toast.success(`Deleted workspace "${label}"`, {
+              description: vpsOk
+                ? "VPS folder and files removed. Your local files are untouched."
+                : payload.vps_folder_removed
+                ? "VPS folder removed, but cloud files could not be deleted. Check VPS manually."
+                : "Workspace record removed. VPS was unreachable — clean up manually when it's back.",
+            });
+            setPendingConfirm(null);
           } catch {
             toast.error("Network error — could not delete workspace");
             setPendingConfirm({ ...pendingConfirm, busy: false });

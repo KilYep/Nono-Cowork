@@ -1167,20 +1167,115 @@ async def patch_workspace(workspace_id: str, request: Request):
 
 @app.delete("/api/workspaces/{workspace_id}")
 async def delete_workspace(workspace_id: str):
-    """Delete a workspace.
+    """Permanently delete a workspace and all VPS-side traces.
 
-    Does NOT delete the underlying Syncthing folder (that's done via
-    DELETE /api/sync/folders/{folder_id} separately, if desired).
-    Sessions that belonged to this workspace are NOT deleted — they
-    become orphans and will fall back to the default workspace when
-    loaded.
+    Destructive — intentionally. The user-visible "delete workspace"
+    promise is: nothing of this workspace remains anywhere except on
+    the user's local disk (which we NEVER touch). Concretely this
+    endpoint:
+
+      1. Refuses if this is the default workspace (safety net).
+      2. Removes the folder from VPS Syncthing config so the VPS
+         stops accepting updates and stops broadcasting its state.
+      3. Deletes the VPS-side physical files (`shutil.rmtree`).
+      4. Deletes the workspace record.
+
+    The desktop caller is responsible for a 5th step: removing the
+    folder from the *local* Syncthing config (via the
+    `syncthing-remove-folder` IPC). We return `folder_id` so the
+    caller can do that without re-querying. This ordering (VPS
+    forgets folder → VPS deletes files → local forgets folder)
+    ensures no Syncthing "file deleted" signal ever reaches the
+    user's local disk.
+
+    Single-device assumption: if multiple clients share this folder
+    in the future, this endpoint becomes a global nuke — revisit
+    semantics at that point.
     """
+    import shutil
     from core.workspace import workspaces as _workspaces
+    from tools.syncthing import SyncthingClient
+
+    ws = _workspaces.get(workspace_id)
+    if ws is None:
+        return JSONResponse({"error": "workspace not found"}, status_code=404)
+    if ws.get("is_default"):
+        return JSONResponse(
+            {"error": "cannot delete the default workspace"},
+            status_code=409,
+        )
+
+    folder_id = ws.get("folder_id")
+    folder_path: str | None = None
+    vps_folder_removed = False
+    vps_files_removed = False
+
+    # Step 1+2: find & remove folder from VPS Syncthing, note its path.
+    if folder_id:
+        try:
+            st = SyncthingClient()
+            for f in st.get_folders():
+                if f.get("id") == folder_id:
+                    folder_path = f.get("path")
+                    break
+            if folder_path is not None:
+                try:
+                    st._delete(f"/rest/config/folders/{folder_id}")
+                    vps_folder_removed = True
+                    logger.info(
+                        "[delete_workspace] Removed VPS Syncthing folder %s",
+                        folder_id,
+                    )
+                except Exception as e:
+                    logger.error(
+                        "[delete_workspace] Failed to remove VPS folder %s: %s",
+                        folder_id, e,
+                    )
+                    return JSONResponse(
+                        {"error": f"failed to remove VPS folder: {e}"},
+                        status_code=503,
+                    )
+        except Exception as e:
+            logger.warning(
+                "[delete_workspace] Syncthing unreachable; skipping VPS cleanup: %s",
+                e,
+            )
+
+    # Step 3: physically delete VPS files. Only attempt after the folder
+    # is unregistered from Syncthing — otherwise Syncthing would see an
+    # empty folder and broadcast deletions.
+    if vps_folder_removed and folder_path and os.path.isdir(folder_path):
+        try:
+            shutil.rmtree(folder_path)
+            vps_files_removed = True
+            logger.info(
+                "[delete_workspace] Deleted VPS folder contents at %s",
+                folder_path,
+            )
+        except Exception as e:
+            # Don't abort the whole operation — workspace record cleanup
+            # is still worth doing. Report the partial state.
+            logger.error(
+                "[delete_workspace] Failed to rmtree %s: %s",
+                folder_path, e,
+            )
+
+    # Step 4: delete the workspace record.
     ok, msg = _workspaces.delete(workspace_id)
     if not ok:
+        # Would only happen in a race — we already verified it exists
+        # and isn't the default. Still, surface honestly.
         code = 404 if "not found" in msg else 409
         return JSONResponse({"error": msg}, status_code=code)
-    return {"message": msg, "workspace_id": workspace_id}
+
+    return {
+        "message": "deleted",
+        "workspace_id": workspace_id,
+        "folder_id": folder_id,
+        "vps_folder_removed": vps_folder_removed,
+        "vps_files_removed": vps_files_removed,
+        "vps_folder_path": folder_path,
+    }
 
 
 @app.post("/api/sync/folders")
