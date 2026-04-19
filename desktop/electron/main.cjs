@@ -345,11 +345,17 @@ function generateFolderId() {
 //
 // If you change this list, mention it in the changelog: users who added
 // a folder under an old version keep their older (or missing) .stignore.
+// Bump this whenever DEFAULT_STIGNORE content meaningfully changes so
+// ensureDefaultStignore() can auto-upgrade folders whose .stignore is
+// still the Nono-managed template from an older build.
+const STIGNORE_TEMPLATE_VERSION = 2;
+
 const DEFAULT_STIGNORE = [
-  '// Managed by Nono CoWork — edit freely. Lines starting with "//" are comments.',
+  `// Managed by Nono CoWork v${STIGNORE_TEMPLATE_VERSION} — edit freely. Lines starting with "//" are comments.`,
   '// This file prevents Syncthing from pushing regenerable or sensitive',
   '// files to the VPS. Delete a line to sync something that\'s currently',
-  '// blocked.',
+  '// blocked. Keep the header line above intact to let Nono auto-upgrade',
+  '// the template; remove it to take full ownership.',
   '',
   '// Version control',
   '.git',
@@ -360,8 +366,11 @@ const DEFAULT_STIGNORE = [
   '__pycache__',
   '*.pyc',
   '*.pyo',
-  '.venv',
-  'venv',
+  // Catch any virtualenv-like directory: .venv, venv, .blog_venv,
+  // my-project-venv, virtualenv, .virtualenvs, etc. Users name venvs
+  // all kinds of things; a literal list never keeps up.
+  '*venv*',
+  '*virtualenv*',
   'env',
   '.pytest_cache',
   '.mypy_cache',
@@ -413,22 +422,50 @@ const DEFAULT_STIGNORE = [
 ].join('\n');
 
 /**
- * Ensure `<folderPath>/.stignore` exists. Writes the default template
- * when it's missing; leaves any existing file alone. Returns true if it
- * wrote a new file, false otherwise.
+ * Ensure `<folderPath>/.stignore` exists and is at the current template
+ * version. Behavior:
+ *   - Missing file → write the default template.
+ *   - Exists and starts with the "Managed by Nono CoWork" header →
+ *     parse the template version. If older than the current version,
+ *     overwrite with the latest template.
+ *   - Exists but header is gone → user has taken ownership; leave
+ *     completely untouched.
+ * Returns true if the file was written (new or upgrade), false otherwise.
  */
 function ensureDefaultStignore(folderPath) {
   try {
     const ignorePath = path.join(folderPath, '.stignore');
-    if (fs.existsSync(ignorePath)) return false;
-    // Make sure the folder exists first (caller should already have done
-    // this, but be defensive — the renderer can call in either order).
-    fs.mkdirSync(folderPath, { recursive: true });
+    if (!fs.existsSync(ignorePath)) {
+      // Make sure the folder exists first (caller should already have
+      // done this, but be defensive — renderer can call in either order).
+      fs.mkdirSync(folderPath, { recursive: true });
+      fs.writeFileSync(ignorePath, DEFAULT_STIGNORE, 'utf8');
+      return true;
+    }
+
+    const existing = fs.readFileSync(ignorePath, 'utf8');
+    if (!existing.startsWith('// Managed by Nono CoWork')) {
+      // User removed the marker; they own this file now.
+      return false;
+    }
+
+    // Parse "Managed by Nono CoWork v<N>" from the header. Missing
+    // version number means this is a v1 template (the first one shipped
+    // with no version marker at all).
+    const match = existing.match(/Managed by Nono CoWork v(\d+)/);
+    const existingVersion = match ? parseInt(match[1], 10) : 1;
+    if (existingVersion >= STIGNORE_TEMPLATE_VERSION) {
+      return false;
+    }
+
     fs.writeFileSync(ignorePath, DEFAULT_STIGNORE, 'utf8');
+    console.log(
+      `[syncthing] upgraded .stignore in ${folderPath}: v${existingVersion} → v${STIGNORE_TEMPLATE_VERSION}`,
+    );
     return true;
   } catch (err) {
     // Non-fatal: user can create their own .stignore later.
-    console.warn('[syncthing] failed to write default .stignore:', err.message);
+    console.warn('[syncthing] failed to write/upgrade default .stignore:', err.message);
     return false;
   }
 }
