@@ -70,17 +70,16 @@ logger = logging.getLogger("tools.delegate")
                 "type": "string",
                 "description": (
                     "Which sub-agent provider to use. Leave empty for auto-select (recommended). "
-                    "Options: 'gemini-cli' (powerful, isolated process), "
-                    "'self' (uses own agent loop, always available)."
+                    "Current option: 'self' (uses own agent loop, always available)."
                 ),
             },
             "model": {
                 "type": "string",
                 "description": (
-                    "Model for the sub-agent. Leave empty for provider's default (gemini-2.5-pro). "
-                    "For gemini-cli: Gemini model names (e.g. 'gemini-2.5-flash', 'gemini-2.5-pro', "
-                    "'gemini-3-flash-preview', 'gemini-3.1-pro-preview'). "
-                    "For self: LiteLLM format (e.g. 'gemini/gemini-2.5-pro', 'deepseek/deepseek-chat')."
+                    "Model for the sub-agent. Leave empty for provider default. "
+                    "For self: use LiteLLM model format, e.g. "
+                    "'openrouter/anthropic/claude-sonnet-4.6', "
+                    "'gemini/gemini-2.5-pro', 'deepseek/deepseek-chat'."
                 ),
             },
         },

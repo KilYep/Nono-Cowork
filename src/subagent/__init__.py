@@ -3,7 +3,6 @@ Subagent framework — delegate tasks to independent agent instances.
 
 Provides a pluggable provider system:
   - SelfAgentProvider: reuses this project's own agent_loop (always available)
-  - GeminiCliProvider: delegates to Gemini CLI headless mode (optional)
 
 The active provider is selected automatically based on availability,
 or can be forced via the DELEGATE_PROVIDER env var.
@@ -13,16 +12,14 @@ import os
 import logging
 from subagent.base import SubagentProvider
 from subagent.self_agent import SelfAgentProvider
-from subagent.gemini_cli import GeminiCliProvider
 
 logger = logging.getLogger("subagent")
 
 # ── Provider registry ────────────────────────────────────────────
-# Order matters: first available provider wins when auto-selecting.
+# Keep extensible for future providers, currently self-only.
 
 _PROVIDERS: dict[str, type[SubagentProvider]] = {
-    "gemini-cli": GeminiCliProvider,
-    "self":       SelfAgentProvider,
+    "self": SelfAgentProvider,
 }
 
 
@@ -32,7 +29,7 @@ def get_provider(name: str = None) -> SubagentProvider:
     Resolution order:
     1. Explicit `name` argument
     2. DELEGATE_PROVIDER env var
-    3. Auto-select: first available from registry (gemini-cli > self)
+    3. Auto-select: first available from registry
 
     Falls back to SelfAgentProvider, which is always available.
     """

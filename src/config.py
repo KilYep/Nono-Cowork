@@ -9,19 +9,13 @@ load_dotenv()
 
 # ── Model ──
 MODEL_POOL = [
-    "dashscope/qwen3.5-plus",
-    "dashscope/minimax-m2.7",
-    "gemini/gemini-2.5-pro",
-    "gemini/gemini-3.1-pro-preview",
-    "gemini/gemini-3-flash-preview",
-    "gemini/gemini-3.1-flash-lite-preview",
-    "anthropic/claude-sonnet-4-20250514",
-    "openai/gpt-5.1",
-    "moonshotai/kimi-k2",
-    "deepseek/deepseek-chat",
+    # Unified default routing: OpenRouter
     "openrouter/minimax/minimax-m2.7",
     "openrouter/anthropic/claude-sonnet-4.6",
-    "openrouter/anthropic/claude-haiku-4.5"
+    "openrouter/anthropic/claude-haiku-4.5",
+    "openrouter/openai/gpt-5.1",
+    "openrouter/deepseek/deepseek-chat",
+    "openrouter/google/gemini-2.5-pro",
 ]
 MODEL = os.getenv("MODEL", "openrouter/minimax/minimax-m2.7")
 API_BASE = os.getenv("API_BASE", "").strip()   # Custom OpenAI-compatible endpoint

@@ -628,7 +628,7 @@ async def inject_mock_notifications():
             "sender": "John Doe <john.doe@example.com>",
             "subject": "询价邀请：2026年第三季度办公设备集中采购项目（华南区）",
         },
-        agent_provider="gemini-cli",
+        agent_provider="self",
         agent_duration_s=42.3,
         token_stats={"total_tokens": 8500},
     )
@@ -679,7 +679,7 @@ async def inject_mock_notifications():
             {"role": "tool", "content": '{"status":"reported"}', "tool_call_id": "c6"},
         ],
         event_data={"action": "updated", "path": "Documents/proposal_v2.docx"},
-        agent_provider="gemini-cli",
+        agent_provider="self",
         agent_duration_s=8.2,
         token_stats={"total_tokens": 1500},
     )
@@ -2821,4 +2821,3 @@ def main():
 
 if __name__ == "__main__":
     main()
-

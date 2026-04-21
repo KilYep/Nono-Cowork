@@ -40,7 +40,7 @@ class SelfAgentProvider(SubagentProvider):
                          ) -> tuple[str, list, dict]:
         # Lazy import to avoid circular dependency (agent → tools → subagent → agent)
         from core.agent import agent_loop
-        from config import COMPRESSION_MODEL
+        from config import COMPRESSION_MODEL, AGENT_WORK_DIR
 
         # Priority: explicit param > COMPRESSION_MODEL default
         use_model = model or COMPRESSION_MODEL
@@ -55,6 +55,12 @@ class SelfAgentProvider(SubagentProvider):
             "- Do NOT ask follow-up questions — complete the task with the given information\n"
         )
         system += f"\n\nYour working directory is: {os.path.expanduser(working_dir)}"
+        system += (
+            f"\n\nShared tool environment: {AGENT_WORK_DIR}/"
+            f"\n- CLI tools in {AGENT_WORK_DIR}/bin/ and {AGENT_WORK_DIR}/.venv/bin/ are already in PATH"
+            f"\n- Before installing a tool, check `which <tool>` first — it may already exist"
+            f"\n- Install new CLI tools to {AGENT_WORK_DIR}/bin/, Python packages to {AGENT_WORK_DIR}/.venv/"
+        )
 
         sub_history = [
             {"role": "system", "content": system},

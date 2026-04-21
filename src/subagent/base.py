@@ -14,7 +14,7 @@ class SubagentProvider(ABC):
     """Base class for subagent providers.
 
     Each provider wraps a different execution backend (self agent loop,
-    Gemini CLI, Claude Code, etc.) behind a uniform interface.
+    external agent runtime, etc.) behind a uniform interface.
 
     All providers execute synchronously (blocking). This is intentional:
     the main agent delegates because it needs the result to continue,

@@ -216,7 +216,7 @@ class NotificationStore:
             history: subagent's complete conversation history (session-compatible)
             token_stats: agent usage stats
             event_data: raw event payload (for title generation + audit)
-            agent_provider: "gemini-cli" | "self" | etc.
+            agent_provider: "self" | other provider name
             agent_duration_s: how long the agent worked
             system_prompt: the system prompt used for the subagent
             deliver_to: channel names to push to; None = desktop only

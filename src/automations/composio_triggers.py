@@ -276,7 +276,7 @@ def _handle_trigger_event(data):
     """Process an incoming trigger event using a disposable agent session.
 
     Events are processed ONE AT A TIME (serialized via lock) to prevent
-    multiple Gemini CLI processes from running simultaneously and
+    multiple subagent processes from running simultaneously and
     causing OOM on memory-constrained servers.
 
     Results are stored in the NotificationStore (autonomous session +

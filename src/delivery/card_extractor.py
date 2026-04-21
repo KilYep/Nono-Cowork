@@ -5,7 +5,7 @@ Design: The agent calls a conceptual "report_result" at the end of its work,
 outputting a structured JSON block. This module parses that output.
 
 For agents that support real tool injection (e.g. self-agent), we inject
-report_result as an actual tool. For agents that don't (e.g. Gemini CLI),
+report_result as an actual tool. For agents that don't support tool injection,
 we instruct via system prompt to output the JSON block, then parse it here.
 
 Fallback chain:
@@ -84,7 +84,7 @@ REPORT_RESULT_TOOL = {
 
 # ═══════════════════════════════════════════
 #  System prompt snippet
-#  (for agents that DON'T support tool injection, e.g. Gemini CLI)
+#  (for agents that DON'T support tool injection)
 # ═══════════════════════════════════════════
 
 REPORT_RESULT_PROMPT = """
@@ -139,7 +139,7 @@ def extract_card_data(
 
     Tries in order:
       1. report_result tool call in history (for agents with tool injection)
-      2. ```json block in agent text output (for Gemini CLI style)
+      2. ```json block in agent text output (fallback style)
       3. Fallback: raw text as summary
 
     Returns: {"summary": str, "deliverables": list[dict]}
