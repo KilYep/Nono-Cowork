@@ -8,6 +8,7 @@ import {
   ChevronRight,
   ArrowUpFromLine,
   ArrowDownToLine,
+  ExternalLink,
 } from "lucide-react";
 
 // ── Status badge folder icon (matches pencil prototype: folder-icons-set) ──
@@ -92,6 +93,74 @@ interface SyncFolderWidgetProps {
   activeWorkspace: ActiveWorkspace | null;
 }
 
+// ── Circular progress indicator ──
+// Determinate ring when progress is known; indeterminate spinning arc otherwise.
+// Rendered on the right side of a syncing file row in place of the time label.
+
+function CircularProgress({
+  progress,
+  color = "#0B57D0",
+  size = 13,
+  title,
+}: {
+  progress: number | null;
+  color?: string;
+  size?: number;
+  title?: string;
+}) {
+  const strokeWidth = 2;
+  const r = (size - strokeWidth) / 2;
+  const c = 2 * Math.PI * r;
+  const cx = size / 2;
+  const cy = size / 2;
+
+  if (progress == null) {
+    return (
+      <svg
+        width={size}
+        height={size}
+        className="animate-spin"
+        style={{ flexShrink: 0 }}
+      >
+        {title && <title>{title}</title>}
+        <circle cx={cx} cy={cy} r={r} fill="none" stroke="#EAE8E6" strokeWidth={strokeWidth} />
+        <circle
+          cx={cx}
+          cy={cy}
+          r={r}
+          fill="none"
+          stroke={color}
+          strokeWidth={strokeWidth}
+          strokeDasharray={`${c * 0.25} ${c}`}
+          strokeLinecap="round"
+          transform={`rotate(-90 ${cx} ${cy})`}
+        />
+      </svg>
+    );
+  }
+
+  const pct = Math.max(0, Math.min(100, progress));
+  const dash = (pct / 100) * c;
+  return (
+    <svg width={size} height={size} style={{ flexShrink: 0 }}>
+      {title && <title>{title}</title>}
+      <circle cx={cx} cy={cy} r={r} fill="none" stroke="#EAE8E6" strokeWidth={strokeWidth} />
+      <circle
+        cx={cx}
+        cy={cy}
+        r={r}
+        fill="none"
+        stroke={color}
+        strokeWidth={strokeWidth}
+        strokeDasharray={`${dash} ${c}`}
+        strokeLinecap="round"
+        transform={`rotate(-90 ${cx} ${cy})`}
+        style={{ transition: "stroke-dasharray 0.3s ease" }}
+      />
+    </svg>
+  );
+}
+
 // ── File sync row ──
 // A single compact row: direction arrow + filename + progress/time.
 // Chronological mixed list (no grouping); the ↑/↓ arrow differentiates direction.
@@ -102,15 +171,6 @@ function FileSyncRow({ evt }: { evt: SyncFileEvent }) {
   //   outbound = "to you"   (VPS → user)   → ↓ (receiving down)
   const DirectionIcon = evt.direction === "inbound" ? ArrowUpFromLine : ArrowDownToLine;
   const directionColor = "#A8A6A4";
-
-  // Progress may be null even when syncing (transfer not yet reported);
-  // render ellipsis in that case instead of a bogus percentage.
-  const progressLabel =
-    evt.state === "syncing"
-      ? (evt.progress != null ? `${evt.progress}%` : "…")
-      : evt.state === "done"
-      ? (evt.time_ago || "Done")
-      : "Fail";
 
   return (
     <div
@@ -147,20 +207,25 @@ function FileSyncRow({ evt }: { evt: SyncFileEvent }) {
           {evt.path}
         </span>
       </div>
-      <span
-        style={{
-          fontSize: 11,
-          fontWeight: evt.state === "syncing" || evt.state === "error" ? 600 : "normal",
-          color: evt.state === "syncing" ? "#0B57D0"
-            : evt.state === "error" ? "#D14343"
-            : "#A8A6A4",
-          fontFamily: "Inter, sans-serif",
-          flexShrink: 0,
-          textAlign: "right",
-        }}
-      >
-        {progressLabel}
-      </span>
+      {evt.state === "syncing" ? (
+        <CircularProgress
+          progress={evt.progress}
+          title={evt.progress != null ? `${evt.progress}%` : "Syncing"}
+        />
+      ) : (
+        <span
+          style={{
+            fontSize: 11,
+            fontWeight: evt.state === "error" ? 600 : "normal",
+            color: evt.state === "error" ? "#D14343" : "#A8A6A4",
+            fontFamily: "Inter, sans-serif",
+            flexShrink: 0,
+            textAlign: "right",
+          }}
+        >
+          {evt.state === "done" ? (evt.time_ago || "Done") : "Fail"}
+        </span>
+      )}
     </div>
   );
 }
@@ -183,10 +248,36 @@ export function SyncFolderWidget({
   const [totalSyncing, setTotalSyncing] = useState(0);
   const [showPanel, setShowPanel] = useState(false);
   const [panelPos, setPanelPos] = useState({ bottom: 0, left: 0 });
+  const [localPath, setLocalPath] = useState<string>("");
   const buttonRef = useRef<HTMLButtonElement>(null);
   const panelRef = useRef<HTMLDivElement>(null);
 
   const folderId = activeWorkspace?.folder_id || null;
+
+  // Resolve the local filesystem path for this folder via local Syncthing.
+  // The folderStatus.path comes from the VPS API and is a remote path;
+  // we need the actual local path for "Open in Explorer".
+  useEffect(() => {
+    if (!folderId) {
+      setLocalPath("");
+      return;
+    }
+    (async () => {
+      try {
+        const result = await window.electronAPI?.syncthingLocalFolders();
+        if (result?.success && result.folders) {
+          const match = result.folders.find((f) => f.id === folderId);
+          if (match?.path) {
+            setLocalPath(match.path);
+            return;
+          }
+        }
+      } catch {
+        // fall through
+      }
+      setLocalPath("");
+    })();
+  }, [folderId]);
 
   // Recalculate panel position whenever it opens
   useEffect(() => {
@@ -344,17 +435,32 @@ export function SyncFolderWidget({
                   Workspace folder
                 </span>
               </div>
-              <div
+              <button
+                type="button"
+                title={localPath ? `Open ${localPath}` : displayLabel}
+                onClick={async () => {
+                  if (!localPath) return;
+                  try {
+                    await window.electronAPI?.openFolder(localPath);
+                  } catch {
+                    // silently fail
+                  }
+                }}
+                className="transition-colors hover:bg-[#F7F6F5]"
                 style={{
                   padding: "6px 8px",
                   borderRadius: 6,
-                  background: "#F7F6F5",
+                  background: "transparent",
                   display: "flex",
                   flexDirection: "column",
                   gap: 4,
+                  border: "none",
+                  cursor: localPath ? "pointer" : "default",
+                  width: "100%",
+                  textAlign: "left",
                 }}
               >
-                <div style={{ display: "flex", alignItems: "center", gap: 10, minWidth: 0 }}>
+                <div style={{ display: "flex", alignItems: "center", gap: 10, minWidth: 0, width: "100%" }}>
                   <Folder size={16} style={{ color: "#333333", flexShrink: 0 }} />
                   <div style={{ display: "flex", flexDirection: "column", gap: 2, minWidth: 0, flex: 1 }}>
                     <span
@@ -369,7 +475,7 @@ export function SyncFolderWidget({
                     >
                       {displayLabel}
                     </span>
-                    {displayPath && (
+                    {(localPath || displayPath) && (
                       <span
                         style={{
                           fontSize: 11,
@@ -379,9 +485,8 @@ export function SyncFolderWidget({
                           textOverflow: "ellipsis",
                           whiteSpace: "nowrap",
                         }}
-                        title={displayPath}
                       >
-                        {displayPath}
+                        {localPath || displayPath}
                       </span>
                     )}
                   </div>
@@ -399,9 +504,12 @@ export function SyncFolderWidget({
                       {Math.round(barPct)}%
                     </span>
                   )}
+                  {localPath && (
+                    <ExternalLink size={13} style={{ color: "#A8A6A4", flexShrink: 0 }} />
+                  )}
                 </div>
                 {folderStatus && folderStatus.state !== "idle" && (
-                  <div style={{ height: 2, borderRadius: 1, background: "#F0EEEC", overflow: "hidden" }}>
+                  <div style={{ height: 2, borderRadius: 1, background: "#F0EEEC", overflow: "hidden", width: "100%" }}>
                     <div
                       style={{
                         height: "100%",
@@ -412,7 +520,7 @@ export function SyncFolderWidget({
                     />
                   </div>
                 )}
-              </div>
+              </button>
             </div>
 
             {/* Divider */}

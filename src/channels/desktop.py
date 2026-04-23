@@ -1636,12 +1636,10 @@ async def list_sync_events(
     if not buffer:
         return {"events": [], "total_syncing": 0}
 
-    # Self-healing reconcile: if Syncthing says the folder is truly idle
-    # (state=idle + no need-items/bytes), any event still marked `syncing`
-    # in our buffer is stale. Per-event transitions (ItemFinished,
-    # FolderCompletion) are best-effort — a missed or path-mismatched
-    # event can strand a file as "syncing" forever. Trust folder-level
-    # ground truth over per-event state.
+    # Self-healing reconcile: only when both VPS and every connected peer
+    # have drained pending changes. A VPS-local-only check would fire
+    # immediately after an outbound scan finishes, stranding per-file rows
+    # at "just now" while the user's machine was still downloading.
     try:
         from tools.syncthing import SyncthingClient as _St
         _st = _St()
@@ -1649,20 +1647,19 @@ async def list_sync_events(
             [{"id": target_folder_id}] if target_folder_id
             else _st.get_folders()
         )
+        try:
+            _connected = _st.get_connected_device_ids()
+        except Exception:
+            _connected = set()
         for _f in _reconcile_folders:
             _fid = _f.get("id")
             if not _fid:
                 continue
             try:
-                _fs = _st.get_folder_status(_fid)
+                _info = _st.get_folder_sync_info(_fid, connected=_connected)
             except Exception:
                 continue
-            if (
-                _fs.get("state") == "idle"
-                and _fs.get("needFiles", 0) == 0
-                and _fs.get("needBytes", 0) == 0
-                and _fs.get("needDeletes", 0) == 0
-            ):
+            if _info["state"] == "idle":
                 _n = buffer.mark_folder_all_done(_fid)
                 if _n:
                     logger.info(
