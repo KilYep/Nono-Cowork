@@ -1,6 +1,6 @@
 "use client";
 
-import { Badge } from "@/components/ui/badge";
+
 import {
   Collapsible,
   CollapsibleContent,
@@ -9,11 +9,6 @@ import {
 import { cn } from "@/lib/utils";
 import type { DynamicToolUIPart, ToolUIPart } from "ai";
 import {
-  CheckCircleIcon,
-  ChevronRightIcon,
-  CircleIcon,
-  ClockIcon,
-  XCircleIcon,
   TerminalIcon,
   SearchIcon,
   FileTextIcon,
@@ -402,7 +397,7 @@ export const ToolHeader = ({
         ) : isLoading ? (
           <Shimmer duration={1}>
             {getToolDisplayName(derivedName, false)}{" "}
-            {resolvedTitle && resolvedTitle !== derivedName ? resolvedTitle : null}
+            {resolvedTitle && resolvedTitle !== derivedName ? resolvedTitle : ""}
           </Shimmer>
         ) : (
           <>
