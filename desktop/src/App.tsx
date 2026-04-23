@@ -141,7 +141,7 @@ import {
   ModelSelectorLogo,
   ModelSelectorName,
 } from "@/components/ai-elements/model-selector";
-import { PanelLeft, ChevronDown, Square, AlertCircle, RotateCcw, WrenchIcon, ChevronRightIcon } from "lucide-react";
+import { PanelLeft, ChevronDown, Square, AlertCircle, RotateCcw } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import {
   Collapsible,
@@ -373,27 +373,6 @@ function authHeaders(extra: Record<string, string> = {}): Record<string, string>
 
 const FILE_TOOL_NAMES = ["write_file", "edit_file", "create_file"];
 
-function summarizeTools(parts: MessagePart[]): string | null {
-  const toolCalls = parts.filter(p => p.type === "tool_call" && p.toolName !== "report_result");
-  if (toolCalls.length === 0) return null;
-  
-  const counts: Record<string, number> = { command: 0, file: 0, search: 0, other: 0 };
-  for (const tc of toolCalls) {
-     const n = (tc.toolName || "").toLowerCase();
-     if (n.includes("command") || n.includes("bash")) counts.command++;
-     else if (n.includes("file") || n.includes("read") || n.includes("edit")) counts.file++;
-     else if (n.includes("search") || n.includes("web") || n.includes("url")) counts.search++;
-     else counts.other++;
-  }
-  
-  const segments = [];
-  if (counts.command > 0) segments.push(`ran ${counts.command} command${counts.command > 1 ? 's' : ''}`);
-  if (counts.file > 0) segments.push(`accessed ${counts.file} file${counts.file > 1 ? 's' : ''}`);
-  if (counts.search > 0) segments.push(`made ${counts.search} search${counts.search > 1 ? 'es' : ''}`);
-  if (counts.other > 0) segments.push(`used ${counts.other} tool${counts.other > 1 ? 's' : ''}`);
-  
-  return segments.join(', ');
-}
 
 function summarizeToolNames(toolNames: string[]): string | null {
   if (toolNames.length === 0) return null;
@@ -516,7 +495,7 @@ function PartsRenderer({
   parts,
   isActive,
   isStreaming,
-  defaultCollapsed = false,
+  defaultCollapsed: _defaultCollapsed = false,
 }: {
   parts: MessagePart[];
   isActive: boolean;
