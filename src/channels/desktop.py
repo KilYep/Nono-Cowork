@@ -1677,7 +1677,7 @@ async def list_sync_events(
     recent = recent[:limit]
 
     events = []
-    syncing_count = 0
+    event_syncing = 0
     for e in recent:
         # Derive state from the progress/synced fields maintained by the watcher.
         # The watcher updates these in response to ItemStarted/ItemFinished/
@@ -1691,7 +1691,7 @@ async def list_sync_events(
         else:
             state = "syncing"
             progress = e.progress  # may be None when transfer hasn't reported yet
-            syncing_count += 1
+            event_syncing += 1
 
         events.append({
             "path": e.path,
@@ -1705,23 +1705,45 @@ async def list_sync_events(
             "folder_id": e.folder_id,
         })
 
-    # Also check for folder-level "need" files (files that haven't even
-    # triggered a RemoteChangeDetected event yet but are queued for download)
+    # Folder-level pending count — covers files queued but not yet in the
+    # event buffer (e.g. after a Syncthing restart). For each folder take
+    # the larger side's need-items so both directions are represented:
+    #   inbound  → VPS's own needFiles
+    #   outbound → connected peer's needItems
+    folder_pending = 0
     try:
         from tools.syncthing import SyncthingClient
         st = SyncthingClient()
+        try:
+            connected = st.get_connected_device_ids()
+        except Exception:
+            connected = set()
         for f in st.get_folders():
-            # Respect the workspace scoping above
             if target_folder_id and f.get("id") != target_folder_id:
                 continue
             try:
                 fs = st.get_folder_status(f["id"])
-                need_files = fs.get("needFiles", 0)
-                syncing_count += need_files
+                self_need = fs.get("needFiles", 0) or 0
+                peer_need = 0
+                for dev in st.get_peer_device_ids(f["id"]):
+                    if dev not in connected:
+                        continue
+                    try:
+                        comp = st.get_completion(f["id"], dev)
+                        peer_need += comp.get("needItems", 0) or 0
+                    except Exception:
+                        pass
+                folder_pending += max(self_need, peer_need)
             except Exception:
                 pass
     except Exception:
         pass
+
+    # Event buffer and folder status describe the same pending files from two
+    # angles — in the inbound case a RemoteChangeDetected event and VPS's
+    # needFiles both count the upload. Take the larger so the badge never
+    # double-counts (was showing 6 when the user uploaded 3 files).
+    syncing_count = max(event_syncing, folder_pending)
 
     return {"events": events, "total_syncing": syncing_count}
 
