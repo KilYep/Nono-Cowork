@@ -11,6 +11,7 @@ import { cjk } from "@streamdown/cjk";
 import { code } from "@streamdown/code";
 import { math } from "@streamdown/math";
 import { mermaid } from "@streamdown/mermaid";
+import { markdownComponents } from "./markdown-code";
 import { BrainIcon, ChevronDownIcon } from "lucide-react";
 import type { ComponentProps, ReactNode } from "react";
 import {
@@ -218,7 +219,14 @@ export const ReasoningContent = memo(
       {...props}
     >
       <div className="text-[13px] leading-relaxed text-muted-foreground/90" style={{ contain: "content" }}>
-        <Streamdown plugins={streamdownPlugins}>{children}</Streamdown>
+        <Streamdown
+          plugins={streamdownPlugins}
+          components={markdownComponents}
+          controls={{ code: false, table: false, mermaid: false }}
+          lineNumbers={false}
+        >
+          {children}
+        </Streamdown>
       </div>
     </CollapsibleContent>
   )

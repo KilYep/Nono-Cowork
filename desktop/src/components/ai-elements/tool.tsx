@@ -19,7 +19,6 @@ import {
 import type { ComponentProps, ReactNode } from "react";
 import { isValidElement, useCallback, useState } from "react";
 
-import { CodeBlock } from "./code-block";
 import { Shimmer } from "./shimmer";
 import { useScrollAnchor } from "./use-scroll-anchor";
 
@@ -418,6 +417,7 @@ export const ToolHeader = ({
 
 export type ToolContentProps = ComponentProps<typeof CollapsibleContent>;
 
+// Flat content area — just indent with a subtle left rule, no outer card.
 export const ToolContent = ({ className, ...props }: ToolContentProps) => (
   <CollapsibleContent
     className={cn(
@@ -425,24 +425,71 @@ export const ToolContent = ({ className, ...props }: ToolContentProps) => (
       className
     )}
   >
-    <div className="mt-1 flex flex-col gap-2 rounded-lg border border-border/80 p-2 shadow-sm" {...props} />
+    <div
+      className="mt-1 flex flex-col gap-3 border-l border-border/50 pl-3"
+      {...props}
+    />
   </CollapsibleContent>
+);
+
+// Shared flat code surface for tool I/O: no nested card, wraps long lines,
+// mono font, subtle muted background.
+const IOBlock = ({
+  children,
+  tone = "default",
+  wrap = true,
+}: {
+  children: ReactNode;
+  tone?: "default" | "error";
+  wrap?: boolean;
+}) => (
+  <pre
+    className={cn(
+      "m-0 rounded-md px-3 py-2 font-mono text-[12px] leading-relaxed",
+      "overflow-x-auto",
+      wrap ? "whitespace-pre-wrap break-words" : "whitespace-pre",
+      tone === "error"
+        ? "bg-destructive/10 text-destructive"
+        : "bg-muted/40 text-foreground/90"
+    )}
+  >
+    {children}
+  </pre>
+);
+
+const IOLabel = ({
+  children,
+  tone = "default",
+}: {
+  children: ReactNode;
+  tone?: "default" | "error";
+}) => (
+  <h4
+    className={cn(
+      "font-medium text-[11px] uppercase tracking-wide",
+      tone === "error" ? "text-destructive/80" : "text-muted-foreground/70"
+    )}
+  >
+    {children}
+  </h4>
 );
 
 export type ToolInputProps = ComponentProps<"div"> & {
   input: ToolPart["input"];
 };
 
-export const ToolInput = ({ className, input, ...props }: ToolInputProps) => (
-  <div className={cn("space-y-1 overflow-hidden bg-muted/40 rounded-md p-3", className)} {...props}>
-    <h4 className="font-medium text-muted-foreground text-[11px] capitalize tracking-wide">
-      Input
-    </h4>
-    <div className="rounded-md">
-      <CodeBlock code={typeof input === 'string' ? input : JSON.stringify(input, null, 2)} language="json" />
+export const ToolInput = ({ className, input, ...props }: ToolInputProps) => {
+  const text =
+    typeof input === "string" ? input : JSON.stringify(input, null, 2);
+  // Input is structured JSON — preserve its formatting, allow horizontal scroll
+  // only if a single line is genuinely too long.
+  return (
+    <div className={cn("flex flex-col gap-1", className)} {...props}>
+      <IOLabel>Input</IOLabel>
+      <IOBlock wrap>{text}</IOBlock>
     </div>
-  </div>
-);
+  );
+};
 
 export type ToolOutputProps = ComponentProps<"div"> & {
   output: ToolPart["output"];
@@ -459,32 +506,22 @@ export const ToolOutput = ({
     return null;
   }
 
-  let Output = <div>{output as ReactNode}</div>;
-
-  if (typeof output === "object" && !isValidElement(output)) {
-    Output = (
-      <CodeBlock code={JSON.stringify(output, null, 2)} language="json" />
-    );
+  const tone = errorText ? "error" : "default";
+  let body: ReactNode;
+  if (errorText) {
+    body = <IOBlock tone="error">{errorText}</IOBlock>;
+  } else if (typeof output === "object" && !isValidElement(output)) {
+    body = <IOBlock>{JSON.stringify(output, null, 2)}</IOBlock>;
   } else if (typeof output === "string") {
-    Output = <CodeBlock code={output} language="json" />;
+    body = <IOBlock>{output}</IOBlock>;
+  } else {
+    body = <div className="text-[13px]">{output as ReactNode}</div>;
   }
 
   return (
-    <div className={cn(
-      "space-y-1 bg-muted/40 rounded-md p-3", 
-      errorText ? "bg-destructive/10 text-destructive" : "", 
-      className
-    )} {...props}>
-      <h4 className={cn(
-        "font-medium text-muted-foreground text-[11px] capitalize tracking-wide",
-        errorText && "text-destructive/80"
-      )}>
-        {errorText ? "Error" : "Result"}
-      </h4>
-      <div className="overflow-x-auto rounded-md text-xs [&_table]:w-full">
-        {errorText && <div>{errorText}</div>}
-        {Output}
-      </div>
+    <div className={cn("flex flex-col gap-1", className)} {...props}>
+      <IOLabel tone={tone}>{errorText ? "Error" : "Result"}</IOLabel>
+      {body}
     </div>
   );
 };

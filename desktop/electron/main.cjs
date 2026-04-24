@@ -823,6 +823,33 @@ function createWindow() {
     return { success: true };
   });
 
+  // Reset zoom on every launch and wire our own zoom shortcuts, since the
+  // default Electron menu binds Zoom In to `CmdOrCtrl+Plus` (requires Shift+=)
+  // and persists zoomLevel across restarts via session preferences.
+  mainWindow.webContents.on('did-finish-load', () => {
+    mainWindow.webContents.setZoomLevel(0);
+  });
+
+  const ZOOM_STEP = 0.5;
+  const ZOOM_MIN = -3;
+  const ZOOM_MAX = 3;
+  mainWindow.webContents.on('before-input-event', (event, input) => {
+    if (input.type !== 'keyDown' || !input.control || input.alt || input.meta) return;
+    const key = input.key;
+    const wc = mainWindow.webContents;
+    // Zoom in: Ctrl+= or Ctrl++ (with or without Shift)
+    if (key === '=' || key === '+') {
+      wc.setZoomLevel(Math.min(wc.getZoomLevel() + ZOOM_STEP, ZOOM_MAX));
+      event.preventDefault();
+    } else if (key === '-' || key === '_') {
+      wc.setZoomLevel(Math.max(wc.getZoomLevel() - ZOOM_STEP, ZOOM_MIN));
+      event.preventDefault();
+    } else if (key === '0') {
+      wc.setZoomLevel(0);
+      event.preventDefault();
+    }
+  });
+
   // Open external links in default browser instead of new Electron window
   mainWindow.webContents.setWindowOpenHandler(({ url }) => {
     shell.openExternal(url);
