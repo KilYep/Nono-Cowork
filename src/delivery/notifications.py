@@ -26,6 +26,7 @@ import time
 from datetime import datetime, timezone
 
 from config import AUTO_SESSIONS_DIR, NOTIFICATIONS_FILE
+from core.llm import make_empty_token_stats
 
 logger = logging.getLogger("notifications")
 
@@ -242,13 +243,7 @@ class NotificationStore:
             "created_at": time.time(),
             "last_active": time.time(),
             "model_override": None,
-            "token_stats": token_stats or {
-                "total_prompt_tokens": 0,
-                "total_completion_tokens": 0,
-                "total_tokens": 0,
-                "total_cached_tokens": 0,
-                "total_api_calls": 0,
-            },
+            "token_stats": token_stats or make_empty_token_stats(),
             "history": history,
             "autonomous": True,
             "notification_id": notification_id,

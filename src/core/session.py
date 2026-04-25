@@ -13,6 +13,7 @@ import time
 import logging
 
 from config import SESSIONS_DIR
+from core.llm import make_empty_token_stats
 
 logger = logging.getLogger("session")
 
@@ -225,13 +226,7 @@ class SessionManager:
                 {"role": "system",
                  "content": make_system_prompt(workspace_id=resolved_ws_id)}
             ],
-            "token_stats": {
-                "total_prompt_tokens": 0,
-                "total_completion_tokens": 0,
-                "total_tokens": 0,
-                "total_cached_tokens": 0,
-                "total_api_calls": 0,
-            },
+            "token_stats": make_empty_token_stats(),
             "log_file": log_file,
             "user_id": user_id,
             "created_at": time.time(),
@@ -330,13 +325,7 @@ class SessionManager:
             "session_id": data["id"],
             "workspace_id": data.get("workspace_id"),
             "history": history,
-            "token_stats": data.get("token_stats", {
-                "total_prompt_tokens": 0,
-                "total_completion_tokens": 0,
-                "total_tokens": 0,
-                "total_cached_tokens": 0,
-                "total_api_calls": 0,
-            }),
+            "token_stats": {**make_empty_token_stats(), **(data.get("token_stats") or {})},
             "log_file": log_file,
             "user_id": data["user_id"],
             "created_at": data.get("created_at", time.time()),
