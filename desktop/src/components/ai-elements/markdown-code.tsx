@@ -1,8 +1,8 @@
 "use client";
 
 import { cn } from "@/lib/utils";
-import { CheckIcon, CopyIcon } from "lucide-react";
-import type { HTMLAttributes, ReactNode } from "react";
+import { CheckIcon, CopyIcon, ExternalLinkIcon } from "lucide-react";
+import type { AnchorHTMLAttributes, HTMLAttributes, ReactNode } from "react";
 import {
   isValidElement,
   useCallback,
@@ -201,7 +201,43 @@ const TableCell = ({
   </td>
 );
 
+const LinkRenderer = ({
+  className,
+  children,
+  href,
+  ...props
+}: AnchorHTMLAttributes<HTMLAnchorElement>) => {
+  const isExternal = href?.startsWith("http") || href?.startsWith("//");
+
+  return (
+    <a
+      href={href}
+      className={cn(
+        "inline-flex items-center gap-0.5 cursor-pointer",
+        "text-blue-500 dark:text-blue-400",
+        "underline decoration-blue-500/30 dark:decoration-blue-400/30 underline-offset-2",
+        "rounded-sm -mx-0.5 px-0.5",
+        "transition-all duration-150",
+        "hover:text-blue-600 dark:hover:text-blue-300",
+        "hover:decoration-blue-500/70 dark:hover:decoration-blue-300/70",
+        "hover:bg-blue-500/10 dark:hover:bg-blue-400/10",
+        className
+      )}
+      {...(isExternal
+        ? { target: "_blank", rel: "noopener noreferrer" }
+        : {})}
+      {...props}
+    >
+      {children}
+      {isExternal && (
+        <ExternalLinkIcon className="inline size-3 shrink-0 opacity-50" />
+      )}
+    </a>
+  );
+};
+
 export const markdownComponents = {
+  a: LinkRenderer,
   code: CodeRenderer,
   table: TableRenderer,
   thead: TableHead,

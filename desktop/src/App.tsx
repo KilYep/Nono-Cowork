@@ -1548,6 +1548,9 @@ function App() {
       .filter((f) => f.url && !f.url.startsWith("blob:"))  // Already converted to data URL by PromptInput
       .map((f) => ({ data: f.url, filename: f.filename || "image" }));
 
+    // Always clear the controlled input state on submit
+    setInput("");
+
     await handleSubmit(
       message.text || undefined,
       images.length > 0 ? images : undefined,
