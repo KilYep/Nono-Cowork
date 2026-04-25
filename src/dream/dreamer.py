@@ -101,14 +101,18 @@ def phase1_cluster(queries: list[QueryRecord], model: str | None = None) -> list
         logger.warning("Phase 1 returned non-list JSON: %r", type(parsed).__name__)
         return []
 
-    # Sanitize: only keep entries with valid conv_ids (defensive — model may hallucinate).
+    # Sanitize: drop hallucinated conv_ids and single-session clusters.
+    # The prompt asks for ≥2 distinct conv_ids; this is a belt-and-suspenders
+    # filter in case the model ignores the rule.
     known_ids = {q.conv_id for q in queries}
     clean: list[dict] = []
+    dropped_single = 0
     for p in parsed:
         if not isinstance(p, dict):
             continue
-        conv_ids = [c for c in (p.get("conv_ids") or []) if c in known_ids]
-        if not conv_ids:
+        conv_ids = sorted({c for c in (p.get("conv_ids") or []) if c in known_ids})
+        if len(conv_ids) < 2:
+            dropped_single += 1
             continue
         clean.append({
             "pattern_name": p.get("pattern_name") or "unnamed",
@@ -116,6 +120,8 @@ def phase1_cluster(queries: list[QueryRecord], model: str | None = None) -> list
             "signals": p.get("signals") or "",
             "conv_ids": conv_ids,
         })
+    if dropped_single:
+        logger.info("Phase 1: dropped %d single-session clusters", dropped_single)
     logger.info("Phase 1: %d clusters accepted", len(clean))
     return clean
 

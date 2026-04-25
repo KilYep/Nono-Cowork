@@ -30,10 +30,10 @@ user intents — things the user has asked for more than once, likely to come up
 again. You do NOT yet know how the agent handled these requests; you are only
 looking at the user's side of the conversation.
 
-Your job in this phase: cluster the user queries and surface every cluster
-that looks worth examining in detail later. Be generous — if something might
-recur, include it. A later phase will read the full conversation for each
-cluster and decide whether to distill a skill.
+Your job in this phase: cluster user queries and surface only clusters that
+represent a recurring TASK pattern. Be strict — single occurrences and
+one-off curiosities do not belong here. A later phase will read the full
+conversation for each cluster and decide whether to distill a skill.
 
 Output a JSON array inside a ```json ... ``` fenced block. Each element:
   {
@@ -43,14 +43,23 @@ Output a JSON array inside a ```json ... ``` fenced block. Each element:
     "signals": "why this is worth examining (frequency, similar wording, etc.)"
   }
 
-Rules:
-- Only cluster together queries that share a real intent, not surface keywords.
-- A single conversation may belong to multiple clusters if the user asked for
-  distinct things in it.
-- A cluster with only ONE conversation is valid if the intent looks generic /
-  likely to recur.
-- If nothing looks worth examining, return an empty array: ```json\\n[]\\n```.
+Hard rules — violate any of these and the cluster MUST be dropped:
+- A cluster MUST contain at least 2 DISTINCT conv_ids. Single-session
+  patterns, no matter how generic-sounding, are not eligible. If the user
+  has only asked for it once, wait — let it recur naturally.
+- Cluster on shared INTENT, not surface keywords. Two queries about
+  "downloading" that target completely different domains are not a cluster.
+- EXCLUDE meta / self-correction feedback to the agent. These are user
+  preferences or memory updates, not reusable task skills. Examples that
+  must NOT be clustered:
+    · "you should record that as a skill, not memory"
+    · "next time use tool X"
+    · "you misunderstood, I meant ..."
+    · curiosity questions like "why did you transcode the video?"
 - Do not invent conv_ids. Only use the ones present in the input.
+- If nothing meets the bar, return an empty array: ```json\\n[]\\n```.
+  An empty result is the correct output for a quiet day — don't manufacture
+  patterns to look productive.
 """
 
 
