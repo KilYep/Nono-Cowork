@@ -9,7 +9,7 @@ The two main exports are:
 
 # Import all tool modules to trigger @tool decorator registration
 # Note: `routines` replaces the old `scheduler` tools (unified Routines management)
-from tools import command, file_ops, web, syncthing, routines, memory, channel_ops, delegate  # noqa: F401
+from tools import command, file_ops, web, syncthing, routines, memory, channel_ops, delegate, skill_tools  # noqa: F401
 
 # Re-export the registry contents
 from tools.registry import get_tools_map, get_tools_schema, resolve_allowed_tags, filter_tools_by_tags
