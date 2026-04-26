@@ -40,10 +40,10 @@ class SelfAgentProvider(SubagentProvider):
                          ) -> tuple[str, list, dict]:
         # Lazy import to avoid circular dependency (agent → tools → subagent → agent)
         from core.agent import agent_loop
-        from config import COMPRESSION_MODEL, AGENT_WORK_DIR
+        from config import COMPRESSION_MODEL, AUTONOMOUS_AGENT_MODEL, AGENT_WORK_DIR
 
-        # Priority: explicit param > COMPRESSION_MODEL default
-        use_model = model or COMPRESSION_MODEL
+        # Priority: explicit param > AUTONOMOUS_AGENT_MODEL > COMPRESSION_MODEL
+        use_model = model or AUTONOMOUS_AGENT_MODEL
 
         system = system_prompt or (
             "You are a task executor. Complete the given task thoroughly "
@@ -72,7 +72,7 @@ class SelfAgentProvider(SubagentProvider):
 
         # Blocks until subagent completes (limited by MAX_ROUNDS)
         # Pass check_stop so user /stop propagates to the sub-agent
-        result_history, stats = agent_loop(
+        result_history, stats, _pending_cache = agent_loop(
             sub_history,
             model_override=use_model,
             check_stop=check_stop,

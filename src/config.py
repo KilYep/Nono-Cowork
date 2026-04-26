@@ -47,6 +47,14 @@ COMPRESSION_THRESHOLD = 0.7         # Trigger compression when context usage exc
 COMPRESSION_KEEP_RECENT_TURNS = 4   # Number of recent conversation turns to keep uncompressed
 COMPRESSION_MODEL = "openrouter/minimax/minimax-m2.7"  # Cheap model for generating summaries
 
+# ── Autonomous Agent (trigger / cron / file-drop subagents) ──
+# Default model when a trigger/cron task has no explicit model set.
+# Deliberately stronger than COMPRESSION_MODEL — autonomous tasks often need
+# real reasoning (email triage, scheduling, file analysis, etc.).
+AUTONOMOUS_AGENT_MODEL = os.getenv(
+    "AUTONOMOUS_AGENT_MODEL", "openrouter/anthropic/claude-sonnet-4.6"
+)
+
 # ── Tool Output Spill ──
 TOOL_OUTPUT_MAX_CHARS = 3000        # Max chars per tool output before spilling to file
 TOOL_OUTPUT_PREVIEW_CHARS = 800     # Chars to show as preview when output is spilled
