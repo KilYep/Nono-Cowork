@@ -24,7 +24,7 @@ Away from your computer? Nono can notify you via Telegram or Feishu too.
 **This isn't an assistant waiting for instructions. It's a coworker that's already at work.**
 
 <p align="center">
-  <video src="https://github.com/user-attachments/assets/c0cf0962-afa2-4c02-8f99-721ce31a0453" width="800" controls autoplay loop muted></video>
+  <video src="https://github.com/user-attachments/assets/ae83adab-133f-4a30-9573-42de174efe3b" width="800" controls autoplay loop muted></video>
 </p>
 
 ---
