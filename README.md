@@ -5,8 +5,7 @@ English | [简体中文](README_zh-CN.md)
 <p align="center">
   <a href="LICENSE"><img src="https://img.shields.io/badge/License-Apache%202.0-blue.svg" alt="License"></a>
   <a href="https://www.python.org/"><img src="https://img.shields.io/badge/Python-3.12+-3776AB.svg?logo=python&logoColor=white" alt="Python 3.12+"></a>
-  <a href="https://github.com/KilYep/nono-cowork/stargazers"><img src="https://img.shields.io/github/stars/KilYep/nono-cowork?style=social" alt="GitHub stars"></a>
-  <a href="https://github.com/KilYep/nono-cowork/commits/main"><img src="https://img.shields.io/github/last-commit/KilYep/nono-cowork" alt="Last Commit"></a>
+  <a href="https://github.com/LuliYanng/nono-cowork/stargazers"><img src="https://img.shields.io/github/stars/LuliYanng/nono-cowork?style=social" alt="GitHub stars"></a>
 </p>
 
 <h3 align="center">The proactive agent for real workflows — not just browser tasks.</h3>
@@ -15,17 +14,18 @@ English | [简体中文](README_zh-CN.md)
 
 Most AI agents wait for a prompt. Nono starts when something happens.
 
-It can monitor your email, synced folders, and the apps you connect to it. When a partner sends a contract at 2 AM, Nono downloads the attachment, retrieves last year's agreement from your synced workspace, compares them clause by clause, flags key changes, and drafts a reply.
-
-By the time you open your laptop in the morning, a notification card is waiting on your desktop: *"Contract received. 3 key changes flagged. Draft reply ready for review."* The diff report is already in your local folder. No downloads, no separate dashboard — **the file is already where you work.** Click "Send", and the email goes out.
+It monitors your email, synced folders, and the apps you connect to it. When a customer email arrives overnight, Nono reads the relevant files from your synced workspace, drafts a reply based on what's actually in them, and leaves a notification card on your desktop by morning — review, click "Send", done.
 
 Away from your computer? Nono can notify you via Telegram or Feishu too.
 
 **This isn't an assistant waiting for instructions. It's a coworker that's already at work.**
 
+> **Current stage: Early Beta** — Best suited to personal workflows such as document processing, email monitoring, and file automation. Production use with unrestricted shell access or enterprise deployment is not yet recommended.
+
 <p align="center">
   <video src="https://github.com/user-attachments/assets/ae83adab-133f-4a30-9573-42de174efe3b" width="800" controls autoplay loop muted></video>
 </p>
+
 
 ---
 
@@ -53,7 +53,7 @@ AI agents can already do a lot. But most still fall into the same trade-offs:
 
 | When this happens | Nono gets this done first | You only need to... |
 | :--- | :--- | :--- |
-| 📧 A partner sends a new contract | Download the attachment → retrieve related versions → compare key clauses → draft a reply | Review the diff and decide whether to send |
+| 📧 A prospect asks for pricing | Open your synced rate card → find the matching tier → apply volume discount and add-ons → draft a reply with every number traceable to a sheet row | Review the quote and decide whether to send |
 | 📬 A client goes silent for 3 days | Detect the stalled thread → quote the original conversation → draft a polite follow-up email | Click confirm and let it send |
 | 📊 You drop a spreadsheet into your local work folder | Detect the new file → run analysis → generate charts and conclusions → save a finished report | Open the report |
 | 🗂️ Your inbox fills up with PDFs, screenshots, and loose documents | Identify each file type → rename and categorize it → move it into the right folder | Check the results when you want |
@@ -98,7 +98,7 @@ AI agents can already do a lot. But most still fall into the same trade-offs:
 # Install uv (if not installed)
 curl -LsSf https://astral.sh/uv/install.sh | sh
 
-git clone https://github.com/KilYep/nono-cowork.git
+git clone https://github.com/LuliYanng/nono-cowork.git
 cd nono-cowork
 uv sync
 cp .env.example .env   # Fill in your OPENROUTER_API_KEY
@@ -154,66 +154,6 @@ sudo ufw allow 9090/tcp    # Composio webhook (only if using event triggers)
 
 ---
 
-## Core Capabilities
-
-### 🔥 Proactive Automation (Routines)
-- **Cron schedules** — "Every morning at 8 AM, compile a news briefing"
-- **Event triggers** — "When a new email arrives from @partner.com, process it"
-- **File watchers** — "When a file appears in /inbox/, analyze it"
-- **Human-in-the-loop** — Structured notification cards with approve/reject actions
-
-### 🛠️ Agent Toolkit
-- **File operations** — Read, write, and edit common file types, including PDF, Excel, and Word
-- **Shell execution** — Run shell commands on the VPS
-- **Web access** — Search the web and extract content from web pages
-- **1,000+ app integrations** — Gmail, GitHub, Slack, Notion, and more via [Composio](https://composio.dev)
-- **Syncthing control** — Check sync status, pause/resume, and restore file versions
-- **Sub-agent delegation** — Spin up isolated agent sessions for complex tasks
-- **Persistent context** — Remembers your preferences and context across sessions
-
-### 📡 Multi-Channel
-- **Desktop App** — Electron-based UI with real-time streaming, a notification center, routine management, built-in settings, and guided Syncthing pairing
-- **Telegram** — Full-featured bot with inline actions
-- **Feishu (Lark)** — Native WebSocket integration
-- **Terminal** — Direct CLI access
-
-### 🔒 Security by Architecture
-- Agent runs on an **isolated VPS** — it cannot directly control your local device
-- Files sync via **Syncthing's encrypted peer-to-peer protocol** — no central storage service
-- **Selective sync** — the agent only sees folders you explicitly share
-- **Access control** — restrict to specific Telegram/Feishu user IDs
-- **API token auth** — Desktop API secured with Bearer tokens
-
----
-
-## Project Status
-
-| Area | Status |
-|:---|:---|
-| Terminal / Desktop / Telegram / Feishu channels | ✅ Implemented |
-| Cron scheduling & event triggers | ✅ Implemented |
-| Syncthing file sync & delivery | ✅ Implemented |
-| Composio app integrations | ✅ Implemented (depends on Composio upstream) |
-| Human-in-the-loop approval flow | ✅ Implemented |
-
-> **Current stage: Early Beta** — Best suited to personal workflows such as document processing, email monitoring, and file automation. Production use with unrestricted shell access or enterprise deployment is not yet recommended.
-
----
-
-## Tech Stack
-
-| Component | Technology |
-|:---|:---|
-| LLM Gateway | [OpenRouter](https://openrouter.ai/) — unified access to all major LLMs |
-| File Sync | [Syncthing](https://syncthing.net/) — encrypted peer-to-peer sync |
-| App Integrations | [Composio](https://composio.dev) — OAuth-based 1,000+ app connectors |
-| Scheduling | [APScheduler](https://github.com/agronholm/apscheduler) — cron-based task engine |
-| HTTP Framework | [FastAPI](https://fastapi.tiangolo.com/) + SSE for real-time streaming |
-| Desktop App | [Electron](https://www.electronjs.org/) + React + Vite + shadcn/ui |
-| Feishu | [lark-oapi](https://github.com/larksuite/oapi-sdk-python) — official SDK |
-| Telegram | [pyTelegramBotAPI](https://github.com/eternnoir/pyTelegramBotAPI) |
-| Web Search | [ddgs](https://github.com/deedy5/duckduckgo_search) — DuckDuckGo |
-| Package Manager | [uv](https://docs.astral.sh/uv/) |
 
 ## License
 
