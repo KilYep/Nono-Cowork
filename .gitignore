@@ -60,3 +60,7 @@ syncthing_audit.md
 design/
 
 notes/
+
+.stignore
+
+.stfolder/

@@ -100,6 +100,13 @@ COMPOSIO_EXECUTE_TIMEOUT = int(os.getenv("COMPOSIO_EXECUTE_TIMEOUT", "120"))  # 
 WEBHOOK_PORT = int(os.getenv("WEBHOOK_PORT", "9090"))
 SERVER_HOST = os.getenv("SERVER_HOST", "").strip()  # Public hostname/IP for webhooks
 
+# ── Jina Reader (webpage rendering fallback) ──
+# Jina Reader renders JS-heavy / SPA pages in a headless browser and returns
+# clean Markdown. Without an API key, the free tier is ~20 RPM per IP.
+# With a key (free at https://jina.ai), the limit is higher — 200+ RPM.
+# Set JINA_API_KEY to your key to get the higher tier.
+JINA_API_KEY = os.getenv("JINA_API_KEY", "").strip()
+
 # ── Agent Work Directory ──
 # Scratch area for venvs, build outputs, and other intermediate artifacts that should
 # NOT be placed inside the Syncthing sync folder. Uses XDG cache dir for portability.
