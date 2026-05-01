@@ -12,20 +12,21 @@ load_dotenv()
 # frontend never needs to reverse-engineer provider/name from the routing string.
 # Adding a new model = one dict here; frontend picks it up automatically.
 MODEL_REGISTRY: list[dict] = [
-    {"id": "openrouter/anthropic/claude-sonnet-4.6",          "name": "Claude Sonnet 4.6",              "provider": "anthropic"},
-    {"id": "openrouter/anthropic/claude-haiku-4.5",           "name": "Claude Haiku 4.5",               "provider": "anthropic"},
-    {"id": "openrouter/openai/gpt-5.1",                      "name": "GPT-5.1",                        "provider": "openai"},
+    {"id": "openrouter/anthropic/claude-sonnet-4.6",          "name": "Claude Sonnet 4.6",             "provider": "anthropic"},
+    {"id": "openrouter/anthropic/claude-haiku-4.5",           "name": "Claude Haiku 4.5",              "provider": "anthropic"},
     {"id": "openrouter/openai/gpt-5.4",                      "name": "GPT-5.4",                        "provider": "openai"},
     {"id": "openrouter/openai/gpt-5.4-mini",                 "name": "GPT-5.4 Mini",                   "provider": "openai"},
-    {"id": "openrouter/google/gemini-3.1-pro",               "name": "Gemini 3.1 Pro",                 "provider": "google"},
     {"id": "openrouter/google/gemini-3.1-pro-preview",       "name": "Gemini 3.1 Pro Preview",         "provider": "google"},
     {"id": "openrouter/google/gemini-3-flash-preview",       "name": "Gemini 3 Flash Preview",         "provider": "google"},
     {"id": "openrouter/google/gemini-3.1-flash-lite-preview","name": "Gemini 3.1 Flash Lite Preview",  "provider": "google"},
-    {"id": "openrouter/deepseek/deepseek-chat",              "name": "DeepSeek Chat",                  "provider": "deepseek"},
     {"id": "openrouter/minimax/minimax-m2.7",                "name": "MiniMax M2.7",                   "provider": "minimax"},
     {"id": "openrouter/minimax/minimax-m2.5:free",           "name": "MiniMax M2.5 (Free)",            "provider": "minimax"},
     {"id": "xiaomi/mimo-v2.5-pro",                           "name": "Mimo v2.5 Pro",                  "provider": "xiaomi"},
     {"id": "xiaomi/mimo-v2.5",                               "name": "Mimo v2.5",                      "provider": "xiaomi"},
+    {"id": "openrouter/deepseek/deepseek-v4-pro",            "name": "DeepSeek V4 Pro",                "provider": "deepseek"},
+    {"id": "openrouter/deepseek/deepseek-v4-flash",          "name": "DeepSeek V4 Flash",              "provider": "deepseek"},
+    {"id": "openrouter/z-ai/glm-5.1",                        "name": "Z-AI GLM-5.1",                   "provider": "z-ai"},
+    {"id": "openrouter/moonshotai/kimi-k2.6",                "name": "Kimi K2.6",                      "provider": "moonshotai"},
 ]
 
 # Derived flat list — backward compat for base.py, llm.py, etc.

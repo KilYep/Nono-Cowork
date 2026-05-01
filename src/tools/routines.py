@@ -245,8 +245,8 @@ def list_routines() -> str:
                 "type": "string",
                 "description": (
                     "LLM model for execution. Choose based on task complexity: "
-                    "fast/cheap (e.g., 'gemini/gemini-3-flash-preview') for simple filtering, "
-                    "stronger (e.g., 'gemini/gemini-3.1-pro-preview') for complex analysis. "
+                    "fast/cheap (e.g., 'openrouter/anthropic/claude-haiku-4.5') for simple filtering, "
+                    "stronger (e.g., 'openrouter/anthropic/claude-sonnet-4.6') for complex analysis. "
                     "Leave empty to use system default."
                 ),
             },
