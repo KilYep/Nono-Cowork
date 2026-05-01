@@ -7,11 +7,11 @@ import {
   CollapsibleTrigger,
 } from "@/components/ui/collapsible";
 import { cn } from "@/lib/utils";
-import { cjk } from "@streamdown/cjk";
-import { code } from "@streamdown/code";
-import { math } from "@streamdown/math";
-import { mermaid } from "@streamdown/mermaid";
-import { markdownComponents } from "./markdown-code";
+import { markdownComponents, sanitizeStreamingMath } from "./markdown-code";
+import ReactMarkdown from "react-markdown";
+import remarkGfm from "remark-gfm";
+import remarkMath from "remark-math";
+import rehypeKatex from "rehype-katex";
 import { ChevronDownIcon } from "lucide-react";
 import type { ComponentProps, ReactNode } from "react";
 import {
@@ -24,7 +24,6 @@ import {
   useRef,
   useState,
 } from "react";
-import { Streamdown } from "streamdown";
 
 import { Shimmer } from "./shimmer";
 import { useScrollAnchor } from "./use-scroll-anchor";
@@ -198,13 +197,12 @@ export const ReasoningTrigger = memo(
   }
 );
 
-export type ReasoningContentProps = ComponentProps<
-  typeof CollapsibleContent
-> & {
+export type ReasoningContentProps = ComponentProps<typeof CollapsibleContent> & {
   children: string;
 };
 
-const streamdownPlugins = { cjk, code, math, mermaid };
+const reasoningRehypePlugins = [[rehypeKatex, { errorColor: "currentColor" }]];
+const reasoningRemarkPlugins = [remarkGfm, remarkMath];
 
 export const ReasoningContent = memo(
   ({ className, children, ...props }: ReasoningContentProps) => (
@@ -215,15 +213,17 @@ export const ReasoningContent = memo(
       )}
       {...props}
     >
-      <div className="text-[13px] leading-relaxed text-muted-foreground/90" style={{ contain: "content" }}>
-        <Streamdown
-          plugins={streamdownPlugins}
+      <div
+        className="markdown-prose text-[13px] leading-relaxed text-muted-foreground/90"
+        style={{ contain: "content" }}
+      >
+        <ReactMarkdown
+          remarkPlugins={reasoningRemarkPlugins}
+          rehypePlugins={reasoningRehypePlugins}
           components={markdownComponents}
-          controls={{ code: false, table: false, mermaid: false }}
-          lineNumbers={false}
         >
-          {children}
-        </Streamdown>
+          {sanitizeStreamingMath(children)}
+        </ReactMarkdown>
       </div>
     </CollapsibleContent>
   )

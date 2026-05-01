@@ -1,5 +1,6 @@
 @import "tailwindcss";
 @import "tw-animate-css";
+@plugin "@tailwindcss/typography";
 @import "shadcn/tailwind.css";
 @import "@fontsource-variable/geist";
 
@@ -246,5 +247,29 @@
 
 .notification-card-enter {
   animation: notification-slide-in 280ms cubic-bezier(0.2, 0, 0, 1) both;
+}
+
+/* ═══════════════════════════════════════════
+   Markdown / Code Block
+   ═══════════════════════════════════════════ */
+
+/* Shiki dual-theme: pick light or dark color variables based on .dark class */
+code[data-theme*=" "],
+code[data-theme*=" "] span {
+  color: var(--shiki-light);
+}
+.dark code[data-theme*=" "],
+.dark code[data-theme*=" "] span {
+  color: var(--shiki-dark);
+}
+
+/* Prose link color — align with design system blue */
+.markdown-prose a {
+  color: rgb(59 130 246);
+  text-decoration-color: rgb(59 130 246 / 0.3);
+}
+.dark .markdown-prose a {
+  color: rgb(96 165 250);
+  text-decoration-color: rgb(96 165 250 / 0.3);
 }
 
