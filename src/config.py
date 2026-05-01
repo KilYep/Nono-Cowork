@@ -24,6 +24,8 @@ MODEL_REGISTRY: list[dict] = [
     {"id": "openrouter/deepseek/deepseek-chat",              "name": "DeepSeek Chat",                  "provider": "deepseek"},
     {"id": "openrouter/minimax/minimax-m2.7",                "name": "MiniMax M2.7",                   "provider": "minimax"},
     {"id": "openrouter/minimax/minimax-m2.5:free",           "name": "MiniMax M2.5 (Free)",            "provider": "minimax"},
+    {"id": "xiaomi/mimo-v2.5-pro",                           "name": "Mimo v2.5 Pro",                  "provider": "xiaomi"},
+    {"id": "xiaomi/mimo-v2.5",                               "name": "Mimo v2.5",                      "provider": "xiaomi"},
 ]
 
 # Derived flat list — backward compat for base.py, llm.py, etc.
@@ -31,6 +33,8 @@ MODEL_POOL = [m["id"] for m in MODEL_REGISTRY]
 MODEL = os.getenv("MODEL", "openrouter/minimax/minimax-m2.7")
 API_BASE = os.getenv("API_BASE", "").strip()   # Custom OpenAI-compatible endpoint
 API_KEY = os.getenv("API_KEY", "").strip()      # API key for the custom endpoint
+XIAOMI_API_BASE = os.getenv("XIAOMI_API_BASE", "https://token-plan-sgp.xiaomimimo.com/v1").strip()
+XIAOMI_API_KEY = os.getenv("XIAOMI_API_KEY", "").strip()
 
 # Auto-prefix: if API_BASE is set and MODEL has no provider prefix, treat as openai-compatible
 if API_BASE and "/" not in MODEL:

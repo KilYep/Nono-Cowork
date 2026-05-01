@@ -9,7 +9,7 @@ import time
 
 import litellm
 import requests
-from config import MODEL, API_BASE, API_KEY
+from config import MODEL, API_BASE, API_KEY, XIAOMI_API_BASE, XIAOMI_API_KEY
 
 # Suppress Pydantic serialization warnings triggered by LiteLLM (harmless)
 warnings.filterwarnings("ignore", message="Pydantic serializer warnings")
@@ -182,6 +182,13 @@ def _build_llm_kwargs(messages: list, model: str = None, tools: list = None) -> 
     _THINKING_PROVIDERS = {"gemini", "anthropic"}
     if _provider in _THINKING_PROVIDERS or _sub_provider in _THINKING_PROVIDERS:
         kwargs["reasoning_effort"] = "medium"  # "low" or "high"; Gemini 3 can't fully disable
+
+    # Route xiaomi/ prefix to Xiaomi Token Plan endpoint
+    if _provider == "xiaomi" and XIAOMI_API_KEY:
+        kwargs["model"] = f"openai/{'/'.join(_parts[1:])}"
+        kwargs["api_base"] = XIAOMI_API_BASE
+        kwargs["api_key"] = XIAOMI_API_KEY
+        return kwargs
 
     # Only pass custom API_BASE/API_KEY for OpenAI-compatible mode.
     # Restrict this to:
