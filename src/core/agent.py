@@ -35,24 +35,41 @@ def _usage_field(usage, name: str, default=0):
 # ── History sanitization ──────────────────────────────────────────────────────
 
 def _sanitize_history(history: list) -> list:
-    """Ensure every assistant message with tool_calls has matching tool responses.
+    """Ensure history is valid for the LLM API.
 
-    If a previous agent run crashed mid-execution, the history may contain an
-    assistant message with tool_calls but no (or incomplete) tool response messages.
-    This causes a 400 error from the LLM API.  We fix it by inserting placeholder
-    tool responses for any missing tool_call_ids.
+    Fixes two classes of corruption that can result from a crashed/OOM agent run:
+
+    1. Assistant message with tool_calls but no (or incomplete) tool responses
+       → insert placeholder tool responses for missing tool_call_ids.
+
+    2. Consecutive user messages with no assistant reply in between
+       → insert a placeholder assistant message so the sequence stays valid.
     """
     fixed = []
     i = 0
     while i < len(history):
         msg = history[i]
-        fixed.append(msg)
 
         role = msg.get("role") if isinstance(msg, dict) else getattr(msg, "role", None)
         tool_calls = (
             msg.get("tool_calls") if isinstance(msg, dict)
             else getattr(msg, "tool_calls", None)
         )
+
+        # Fix consecutive user messages: insert a placeholder assistant reply
+        # so the LLM API doesn't receive two user messages in a row.
+        if role == "user" and fixed:
+            prev_role = (
+                fixed[-1].get("role") if isinstance(fixed[-1], dict)
+                else getattr(fixed[-1], "role", None)
+            )
+            if prev_role == "user":
+                fixed.append({
+                    "role": "assistant",
+                    "content": "[Previous response was interrupted. Continuing...]",
+                })
+
+        fixed.append(msg)
 
         if role == "assistant" and tool_calls:
             expected_ids = {tc.id if hasattr(tc, "id") else tc["id"] for tc in tool_calls}
@@ -416,7 +433,7 @@ def _fill_stopped_tool_responses(history: list, tool_calls):
 
 def agent_loop(history: list[dict], log_file=None, token_stats: dict = None,
                on_event=None, check_stop=None, model_override: str = None,
-               tools_override: list[dict] = None):
+               tools_override: list[dict] = None, on_checkpoint=None):
     """Core Agent loop.
 
     Args:
@@ -526,6 +543,8 @@ def agent_loop(history: list[dict], log_file=None, token_stats: dict = None,
                         "prompt_tokens": _usage_field(usage, "prompt_tokens", 0) or 0,
                         "round": round_num,
                     })
+                if on_checkpoint:
+                    on_checkpoint(history, token_stats)
                 break
 
             # ── 3b. Has tool calls → execute ──
@@ -563,6 +582,11 @@ def agent_loop(history: list[dict], log_file=None, token_stats: dict = None,
                     "args": args,
                     "result": tool_result[:2000] if len(tool_result) > 2000 else tool_result,
                 })
+
+            # Persist after every round (assistant msg + all tool results) so
+            # an OOM kill between rounds doesn't lose the completed work.
+            if on_checkpoint:
+                on_checkpoint(history, token_stats)
 
         except KeyboardInterrupt:
             print("\n\n⚡ User interrupted the current task")

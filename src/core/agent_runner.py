@@ -100,6 +100,8 @@ def run_agent_for_message(user_id: str, user_text: str,
         history.append({"role": "user", "content": user_content})
         # Update last_active only when user actually sends a message
         sessions.touch_session(user_id)
+        # Persist user message immediately so an OOM kill can't erase it
+        sessions.save_session(user_id)
         # Log the original text to session log file
         log_event(log_file, {
             "type": f"{channel_name}_message",
@@ -144,6 +146,31 @@ def run_agent_for_message(user_id: str, user_text: str,
         def check_stop():
             return sessions.is_stopped(user_id)
 
+        # Checkpoint callback: persist session after each agent round so an
+        # OOM kill between rounds doesn't lose completed work.
+        # Also strips sync_ctx augmentation from the user message before saving
+        # so it never leaks into the persisted history.
+        def _checkpoint(h, stats):
+            if sync_ctx:
+                for msg in h:
+                    if msg.get("role") != "user":
+                        continue
+                    c = msg.get("content")
+                    if images:
+                        if isinstance(c, list) and any(
+                            p.get("type") == "text" and p.get("text") == augmented_text
+                            for p in c
+                        ):
+                            msg["content"] = user_content
+                            break
+                    else:
+                        if c == augmented_text:
+                            msg["content"] = user_text
+                            break
+            session["history"] = h
+            session["token_stats"] = stats
+            sessions.save_session(user_id)
+
         # Run Agent
         try:
             updated_history, updated_stats, pending_cache_backfills = agent_loop(
@@ -151,6 +178,7 @@ def run_agent_for_message(user_id: str, user_text: str,
                 on_event=on_event,
                 check_stop=check_stop,
                 model_override=model_override,
+                on_checkpoint=_checkpoint,
             )
 
             # Restore original user message (strip sync context before persisting)
