@@ -9,15 +9,16 @@ To add a new section:
   2. Add it to the SECTIONS list in make_system_prompt()
 """
 
+import logging
 import os
 import time
-import logging
 
-from config import COMPOSIO_API_KEY, COMPOSIO_USER_ID, AGENT_WORK_DIR
+from config import AGENT_WORK_DIR, COMPOSIO_API_KEY, COMPOSIO_USER_ID
 
 logger = logging.getLogger("prompt")
 
 # ─── Workspace resolution ───────────────────────────────────────
+
 
 def _resolve_workspace(workspace_id: str | None = None) -> str:
     """Resolve the workspace directory path.
@@ -35,6 +36,7 @@ def _resolve_workspace(workspace_id: str | None = None) -> str:
         try:
             from core.workspace import workspaces
             from tools.syncthing import SyncthingClient
+
             ws = workspaces.get(workspace_id)
             if ws and ws.get("folder_id"):
                 st = SyncthingClient()
@@ -42,7 +44,15 @@ def _resolve_workspace(workspace_id: str | None = None) -> str:
                     if f.get("id") == ws["folder_id"]:
                         return f["path"]
         except Exception as e:
-            logger.debug("Workspace-scoped resolve failed: %s", e)
+            logger.warning("Workspace-scoped resolve failed for %s: %s", workspace_id, e)
+
+        # workspace_id was explicitly provided but resolve failed — skip the
+        # fallback workspace entirely to avoid silently writing into the wrong
+        # workspace. Fall through to env/home instead.
+        env_workspace = os.getenv("WORKSPACE_DIR", "").strip()
+        if env_workspace:
+            return os.path.expanduser(env_workspace)
+        return os.path.expanduser("~/")
 
     # 2. Default-or-fallback workspace. Uses the soft fallback (real
     #    default if set, else most-recently-active) so agents in older
@@ -51,6 +61,7 @@ def _resolve_workspace(workspace_id: str | None = None) -> str:
     try:
         from core.workspace import workspaces
         from tools.syncthing import SyncthingClient
+
         fallback = workspaces.get_any_fallback()
         if fallback and fallback.get("folder_id"):
             st = SyncthingClient()
@@ -68,6 +79,7 @@ def _resolve_workspace(workspace_id: str | None = None) -> str:
     # 4. Syncthing first folder
     try:
         from tools.syncthing import SyncthingClient
+
         st = SyncthingClient()
         folders = st.get_folders()
         if folders:
@@ -83,33 +95,42 @@ def _resolve_workspace(workspace_id: str | None = None) -> str:
 # Each function takes (workspace: str) and returns a prompt section string.
 # Return "" to skip the section.
 
+
 def _section_role(workspace: str) -> str:
-    return f"""\
+    return """\
 # Role
-You are a personal office assistant Agent running on a remote server.
-Your workspace is: {workspace}
-User files are automatically synced with this server via Syncthing.
-Your operations work as if you're on the user's own computer — files you modify will automatically appear on their local machine, and files they modify will sync to you."""
+You are Nono, a capable personal cloud Agent.
+You bridge the user's local world and the broader digital ecosystem —
+Syncthing keeps their local files always within your reach, while deep integrations
+with third-party apps connect you to the SaaS tools they use every day.
+Together, you can orchestrate work that spans devices, platforms, and services — all from one place."""
 
 
 def _section_environment(workspace: str) -> str:
     return f"""\
 # Your Environment
 - Running on a dedicated Linux server with full operation privileges and unrestricted network access
-- Your default working directory is: {workspace}
-- Files synced in real-time with the user's local machine via Syncthing
+- User sync folder (write user-facing files here): {workspace}
+- Agent persistent workspace (venvs, CLI tools, staging — survives across sessions): {AGENT_WORK_DIR}
 - You can freely use all tools on the server (Python, Shell, network, etc.)
 - You can directly download files from any URL using curl/wget — no need for remote sandboxes
-- read_file natively supports PDF, Excel (.xlsx), and Word (.docx) — just call read_file(path) directly, do NOT try to import pymupdf/openpyxl/python-docx yourself
 - run_command uses /bin/sh (POSIX shell), NOT bash. Use '.' instead of 'source' for activating venvs"""
 
 
 # ─── Service status probes ──────────────────────────────────────
 
-def _probe_syncthing() -> str:
-    """Quick Syncthing health check (localhost API, <50ms)."""
+
+def _probe_syncthing(active_workspace: str | None = None) -> str:
+    """Quick Syncthing health check (localhost API, <50ms).
+
+    active_workspace: the resolved folder path for the current session.
+    When provided, that folder is shown in full; all others are folded
+    into a summary line to avoid polluting the agent's context with
+    unrelated workspace paths.
+    """
     try:
         from tools.syncthing import SyncthingClient
+
         st = SyncthingClient()
 
         # Connection status
@@ -124,38 +145,49 @@ def _probe_syncthing() -> str:
                 offline.append(short_id)
 
         if online:
-            device_status = f"🟢 online ({len(online)} device{'s' if len(online) > 1 else ''})"
+            device_status = (
+                f"online ({len(online)} device{'s' if len(online) > 1 else ''})"
+            )
         elif offline:
-            device_status = f"🔴 offline ({len(offline)} device{'s' if len(offline) > 1 else ''}, all disconnected)"
+            device_status = f"offline ({len(offline)} device{'s' if len(offline) > 1 else ''}, all disconnected)"
         else:
-            device_status = "⚠️ no remote devices configured"
+            device_status = "no remote devices configured"
 
-        # Folder status
+        # Folder status — show active workspace in full, fold the rest
         folders = st.get_folders()
-        folder_lines = []
+        active_lines = []
+        other_count = 0
         for f in folders:
             fid = f["id"]
-            try:
-                status = st.get_folder_status(fid)
-                state = status.get("state", "unknown")
-                local_files = status.get("localFiles", 0)
-                paused = " ⏸️paused" if f.get("paused") else ""
-                folder_lines.append(
-                    f"  - {f.get('label', fid)}: {f['path']} "
-                    f"(state: {state}, {local_files} files{paused})"
-                )
-            except Exception:
-                folder_lines.append(f"  - {f.get('label', fid)}: status unavailable")
+            is_active = active_workspace and f.get("path") == active_workspace
+            if is_active:
+                try:
+                    status = st.get_folder_status(fid)
+                    state = status.get("state", "unknown")
+                    local_files = status.get("localFiles", 0)
+                    paused = "paused" if f.get("paused") else ""
+                    active_lines.append(
+                        f"  - {f.get('label', fid)}: {f['path']} "
+                        f"(state: {state}, {local_files} files{paused})"
+                    )
+                except Exception:
+                    active_lines.append(f"  - {f.get('label', fid)}: status unavailable")
+            else:
+                other_count += 1
+
+        folder_lines = active_lines
+        if other_count:
+            folder_lines.append(f"  - (+{other_count} other folder{'s' if other_count > 1 else ''} not shown)")
 
         return (
             f"## Syncthing (File Sync)\n"
-            f"- Service: ✅ running\n"
+            f"- Service: running\n"
             f"- User device: {device_status}\n"
             f"- Folders:\n" + "\n".join(folder_lines)
         )
     except Exception as e:
-        logger.debug("Syncthing probe failed: %s", e)
-        return "## Syncthing (File Sync)\n- Service: ❌ unreachable"
+        logger.warning("Syncthing probe failed: %s", e)
+        return "## Syncthing (File Sync)\n- Service: unreachable"
 
 
 _COMPOSIO_PROBE_TIMEOUT = 5  # seconds — hard cap to avoid blocking session startup
@@ -177,6 +209,7 @@ def _probe_composio() -> str:
     def _do_probe():
         try:
             from composio import Composio
+
             client = Composio()
 
             # Connected apps (ACTIVE accounts)
@@ -188,7 +221,11 @@ def _probe_composio() -> str:
             apps = set()
             for c in conns.items:
                 tk = getattr(c, "toolkit", None)
-                slug = tk.get("slug", "") if isinstance(tk, dict) else getattr(tk, "slug", "")
+                slug = (
+                    tk.get("slug", "")
+                    if isinstance(tk, dict)
+                    else getattr(tk, "slug", "")
+                )
                 if slug:
                     apps.add(slug)
 
@@ -197,9 +234,11 @@ def _probe_composio() -> str:
             trigger_items = getattr(triggers_resp, "items", []) or []
             trigger_list = []
             for t in trigger_items:
-                name = (getattr(t, "trigger_name", None)
-                        or getattr(t, "triggerName", None)
-                        or str(t))
+                name = (
+                    getattr(t, "trigger_name", None)
+                    or getattr(t, "triggerName", None)
+                    or str(t)
+                )
                 trigger_list.append(name)
 
             apps_str = ", ".join(sorted(apps)) if apps else "none yet"
@@ -207,14 +246,14 @@ def _probe_composio() -> str:
 
             result_holder.append(
                 f"## Composio (Third-party Apps)\n"
-                f"- Status: ✅ enabled\n"
+                f"- Status: enabled\n"
                 f"- Connected apps: {apps_str}\n"
                 f"- Active triggers: {triggers_str}"
             )
         except Exception as e:
             logger.debug("Composio probe failed: %s", e)
             result_holder.append(
-                f"## Composio (Third-party Apps)\n- Status: ⚠️ probe failed ({e})"
+                f"## Composio (Third-party Apps)\n- Status: probe failed ({e})"
             )
 
     t = threading.Thread(target=_do_probe, daemon=True)
@@ -224,24 +263,43 @@ def _probe_composio() -> str:
     if result_holder:
         return result_holder[0]
     logger.debug("Composio probe timed out after %ds", _COMPOSIO_PROBE_TIMEOUT)
-    return "## Composio (Third-party Apps)\n- Status: ⚠️ probe timed out"
+    return "## Composio (Third-party Apps)\n- Status: probe timed out"
 
 
-def _section_service_status() -> str:
+def _section_service_status(workspace: str | None = None) -> str:
     """Probe live status of infrastructure services at session start.
 
     Provides the agent with immediate awareness of:
       - Syncthing: running? user device online? folder health?
       - Composio: enabled? connected apps? active triggers?
 
-    This eliminates the need for the agent to call diagnostic tools
-    in the first turn just to understand the environment.
+    Both probes run in parallel to minimise session startup latency.
     """
-    parts = [
-        _probe_syncthing(),
-        _probe_composio(),
-    ]
-    parts = [p for p in parts if p]
+    import threading
+    import time as _time
+
+    results: dict[str, str] = {}
+
+    def run_syncthing():
+        t0 = _time.monotonic()
+        results["syncthing"] = _probe_syncthing(active_workspace=workspace)
+        logger.info("Syncthing probe took %.2fs", _time.monotonic() - t0)
+
+    def run_composio():
+        t0 = _time.monotonic()
+        results["composio"] = _probe_composio()
+        logger.info("Composio probe took %.2fs", _time.monotonic() - t0)
+
+    t0_total = _time.monotonic()
+    t1 = threading.Thread(target=run_syncthing, daemon=True)
+    t2 = threading.Thread(target=run_composio, daemon=True)
+    t1.start()
+    t2.start()
+    t1.join(timeout=_COMPOSIO_PROBE_TIMEOUT)
+    t2.join(timeout=_COMPOSIO_PROBE_TIMEOUT)
+    logger.info("Service status probes total: %.2fs", _time.monotonic() - t0_total)
+
+    parts = [p for p in [results.get("syncthing", ""), results.get("composio", "")] if p]
 
     if not parts:
         return ""
@@ -267,44 +325,33 @@ def _section_capabilities() -> str:
 def _section_sync_rules(workspace: str) -> str:
     return f"""\
 # Sync Rules (ONLY for files in {workspace})
-These rules ONLY apply when you create, modify, or delete files inside {workspace}.
-Do NOT call sync tools for operations outside {workspace} (e.g., installing skills, modifying project code).
-- Files in {workspace} auto-sync to the user's machine via Syncthing (2-3 seconds delay)
-- BEFORE your first file operation in {workspace}: check the Syncthing status in "Current Service Status" above. Only call sync_status() if the status was unreachable or you need the latest state
+These rules apply ONLY inside {workspace} — do not call sync tools for operations elsewhere (e.g., installing tools, modifying project code).
+- Files in {workspace} sync to the user's machine in near real-time via Syncthing
+- BEFORE your first file operation: use the Syncthing status in "Current Service Status" above if the session just started. If the session has been running for a while or the status was unreachable, call sync_status() to get the latest state
 - AFTER you finish all file changes in {workspace}: call sync_wait() so the user receives the results
-- WHEN modifying/deleting/renaming 3+ files at once: call sync_pause() FIRST → do all changes → call sync_resume() when done. This prevents the user from seeing a half-finished state
-- WHEN the user reports a file was accidentally deleted or overwritten: call sync_versions() to list recoverable versions, then sync_restore() to bring it back. Also check list_snapshots() — every edit_file call auto-saves the original file before modifying it
-- WHEN you see any file matching *.sync-conflict-* pattern (via ls or find): alert the user immediately — this means both sides edited the same file. Compare both versions and ask which to keep
-- WHEN the user says "undo" or wants to revert your edit: call list_snapshots() to find the pre-edit backup, then cp it back
+- WHEN making 3+ file changes (write_file, edit_file, or shell operations) at once: call sync_pause() FIRST → make all changes → call sync_resume(). WHY: Syncthing syncs each file the moment it changes — without pausing, the user's machine receives files one by one and may see an inconsistent half-finished state
+- WHEN the user reports a file was accidentally deleted or overwritten: call sync_versions() to list recoverable versions, then sync_restore() to bring it back. Also check list_snapshots() — every edit_file call auto-saves the original before modifying
+- WHEN you see any file matching *.sync-conflict-* pattern: alert the user immediately — this means both sides edited the same file. Compare both versions and ask which to keep
+- WHEN the user says "undo" or wants to revert your edit: call list_snapshots() to find the pre-edit backup, then restore it with run_command('cp <snapshot_path> <original_path>')
 
 ## File Sync Awareness
 - When the user's message includes a <file_sync_activity> block, it lists files recently synced from their local device. Use this to understand what "that file", "the one I just uploaded", or "those PDFs" refers to
-- If a file is marked ⏳ syncing, it has not finished downloading yet — call sync_wait() before trying to read it
-- If a ⚠️ CONFLICT is noted, alert the user about the sync-conflict file immediately
+- If a file is marked syncing, it has not finished downloading yet — call sync_wait() before trying to read it
+- If a CONFLICT is noted, alert the user about the sync-conflict file immediately
 - This context is injected automatically — do NOT ask the user to specify file paths when they clearly refer to recently synced files
 - If no <file_sync_activity> block is present, no files were recently synced from the user's device
 
 ## Workspace Hygiene (CRITICAL)
-The sync folder ({workspace}) is ONLY for user-facing files. The core principle: **only finished, user-facing files belong in the sync folder. All intermediate work happens in {AGENT_WORK_DIR}/.**
+The sync folder ({workspace}) is ONLY for finished, user-facing files. Everything else — downloads, conversions, venvs, build outputs — goes in {AGENT_WORK_DIR}/. WHY: Syncthing syncs {workspace} in real-time, so incomplete files and large artifacts (venvs can be hundreds of MB) go straight to the user's machine.
 
-### Downloads & file processing — use $STAGING_DIR
-Any operation that produces intermediate/temporary files MUST run outside the sync folder. The environment variable `$STAGING_DIR` is available in all run_command calls for this purpose.
-- ALWAYS download files (curl, wget, yt-dlp, git clone archives, etc.) to `$STAGING_DIR` first, then `mv` the final result into {workspace}. Example: `yt-dlp -o '$STAGING_DIR/%(title)s.%(ext)s' URL && mv '$STAGING_DIR/result.mp4' '{workspace}/'`
-- ALWAYS run file conversions (ffmpeg, ImageMagick, pandoc, etc.) with output to `$STAGING_DIR`, then `mv` the result
-- ALWAYS extract archives (unzip, tar) into `$STAGING_DIR`, then `mv` what's needed
-- WHY: Syncthing watches {workspace} in real-time. Downloading directly there causes it to sync incomplete/temporary files, which leads to orphaned transfer artifacts on the user's machine when the source file is later renamed or deleted
-
-### Dev artifacts — keep out of sync
-- NEVER create Python virtual environments (venv, .venv) inside {workspace}. Use {AGENT_WORK_DIR}/ instead
-- NEVER run pip install / uv pip install with a venv located inside {workspace}
-- NEVER place build outputs (dist/, build/, *.egg-info) inside {workspace}
-- When writing scripts that need dependencies, create the venv in {AGENT_WORK_DIR}/<script_name>/ and reference it from there"""
+- For intermediate files, use {AGENT_WORK_DIR}/staging/, then `mv` only the final result into the appropriate location within {workspace}."""
 
 
 def _section_skills() -> str:
     """Load and inject skill descriptions (progressive disclosure)."""
     try:
         from skills import discover_skills, format_skills_prompt_section
+
         skills = discover_skills()
         return format_skills_prompt_section(skills)
     except Exception as e:
@@ -315,10 +362,8 @@ def _section_skills() -> str:
 def _section_communication() -> str:
     return """\
 # Communication Style
-- When calling tools, ALWAYS include a brief narration explaining what you're about to do
-- Never call a tool silently — pair every tool call with a short, natural explanation
-- Examples: "Let me check the file contents..." (read_file), "I'll create that file now..." (write_file), "Let me look at the directory..." (run_command)
-- Keep narrations concise (one sentence), don't over-explain"""
+- Never call a tool silently — always include a brief one-sentence narration explaining what you're about to do
+- Examples: "Let me check the file contents..." (read_file), "I'll create that file now..." (write_file), "Let me look at the directory..." (run_command)"""
 
 
 def _section_deliverables(workspace: str) -> str:
@@ -354,22 +399,21 @@ def _section_work_habits() -> str:
     return f"""\
 # Work Habits
 - Before operating, use read_file or run_command("ls") to check the current state — don't guess
+- read_file natively supports PDF, Excel (.xlsx), and Word (.docx) — just call read_file(path) directly, do NOT try to import pymupdf/openpyxl/python-docx yourself
 - After each step, verify the result before proceeding
 - ALWAYS use write_file to create new files — it auto-creates parent directories. NEVER use run_command("echo ... > file") to create files, because that bypasses the sync folder protections
 - ALWAYS use edit_file to modify existing files — it auto-saves a backup before each edit. NEVER use run_command("sed -i ...") or shell redirects to modify files in the sync folder, because those bypass the backup system
 - When encountering errors, carefully analyze the traceback and identify the root cause before fixing
 - If the same error persists after 3 fix attempts, proactively search the web for solutions
-- A shared tool environment exists at {AGENT_WORK_DIR}/ — CLI tools installed here persist across all sessions
-- When you need extra Python packages, create a venv with `python3 -m venv {AGENT_WORK_DIR}/.venv` and install there. NEVER create venvs in the sync folder
+- When you need extra Python packages, FIRST check if {AGENT_WORK_DIR}/.venv already exists: `ls {AGENT_WORK_DIR}/.venv` — reuse it if present, only create with `python3 -m venv {AGENT_WORK_DIR}/.venv` if it doesn't exist. NEVER create venvs in the sync folder
 - To run scripts with the venv: `. {AGENT_WORK_DIR}/.venv/bin/activate && pip install ... && python3 script.py`
-- For standalone CLI tools (yt-dlp, etc.), install them to {AGENT_WORK_DIR}/bin/ so they're available in future sessions. Example: `curl -L ... -o {AGENT_WORK_DIR}/bin/yt-dlp && chmod +x {AGENT_WORK_DIR}/bin/yt-dlp`
-- Before installing a tool, check if it already exists by running `which <tool>` — it may have been installed in a previous session"""
+- For standalone CLI tools (yt-dlp, etc.), FIRST check {AGENT_WORK_DIR}/bin/: `ls {AGENT_WORK_DIR}/bin/` — only install if not already there. Install to {AGENT_WORK_DIR}/bin/ so they persist. Example: `curl -L ... -o {AGENT_WORK_DIR}/bin/yt-dlp && chmod +x {AGENT_WORK_DIR}/bin/yt-dlp`"""
 
 
 def _section_safety(workspace: str) -> str:
     return f"""\
 # Safety Principles
-- Prefer working within {workspace}
+- Default to working within {workspace} — only operate outside it when the task explicitly requires it
 - Don't modify system-level configurations unless the user explicitly requests it
 - For delete operations, confirm before executing
 - Don't store sensitive information (keys, passwords, etc.) in the synced folder
@@ -385,16 +429,18 @@ Current time: {time.strftime("%Y-%m-%d %H:%M:%S", time.localtime())}"""
 
 def _section_memory() -> str:
     """Load persistent memory and format it as a prompt section."""
-    from memory.store import load_memory
     from config import MEMORY_MAX_INJECT_CHARS
+    from memory.store import load_memory
 
     memory_content = load_memory()
     if not memory_content:
         saved = ""
     else:
         if len(memory_content) > MEMORY_MAX_INJECT_CHARS:
-            memory_content = memory_content[:MEMORY_MAX_INJECT_CHARS] + \
-                "\n\n... [memory truncated — it's getting long, reorganize and prune when you next write]"
+            memory_content = (
+                memory_content[:MEMORY_MAX_INJECT_CHARS]
+                + "\n\n... [memory truncated — it's getting long, reorganize and prune when you next write]"
+            )
         saved = f"\n\n## Saved Memories\n{memory_content}"
 
     return f"""\
@@ -408,6 +454,7 @@ To update memories, use the `memory_write` tool — it OVERWRITES the entire fil
 
 
 # ─── Builder ────────────────────────────────────────────────────
+
 
 def make_system_prompt(workspace_id: str | None = None) -> str:
     """Assemble the system prompt from all sections.
@@ -424,7 +471,7 @@ def make_system_prompt(workspace_id: str | None = None) -> str:
     sections = [
         _section_role(workspace),
         _section_environment(workspace),
-        _section_service_status(),
+        _section_service_status(workspace=workspace),
         _section_capabilities(),
         _section_sync_rules(workspace),
         _section_skills(),

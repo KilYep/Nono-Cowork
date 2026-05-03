@@ -109,11 +109,11 @@ SERVER_HOST = os.getenv("SERVER_HOST", "").strip()  # Public hostname/IP for web
 JINA_API_KEY = os.getenv("JINA_API_KEY", "").strip()
 
 # ── Agent Work Directory ──
-# Scratch area for venvs, build outputs, and other intermediate artifacts that should
-# NOT be placed inside the Syncthing sync folder. Uses XDG cache dir for portability.
+# Persistent agent workspace: venvs, CLI tools, staging area, and other intermediate
+# artifacts that should NOT be placed inside the Syncthing sync folder.
 # Override with AGENT_WORK_DIR env var if needed.
 AGENT_WORK_DIR = os.path.expanduser(
-    os.getenv("AGENT_WORK_DIR", "~/.cache/hands-on-agent")
+    os.getenv("AGENT_WORK_DIR", "~/.nono")
 )
 
 # ── Tool Redirects ──
