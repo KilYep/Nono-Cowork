@@ -31,7 +31,7 @@ MODEL_REGISTRY: list[dict] = [
 
 # Derived flat list — backward compat for base.py, llm.py, etc.
 MODEL_POOL = [m["id"] for m in MODEL_REGISTRY]
-MODEL = os.getenv("MODEL", "openrouter/minimax/minimax-m2.7")
+MODEL = os.getenv("MODEL", "openrouter/deepseek/deepseek-v4-pro")
 API_BASE = os.getenv("API_BASE", "").strip()   # Custom OpenAI-compatible endpoint
 API_KEY = os.getenv("API_KEY", "").strip()      # API key for the custom endpoint
 XIAOMI_API_BASE = os.getenv("XIAOMI_API_BASE", "https://token-plan-sgp.xiaomimimo.com/v1").strip()
@@ -50,14 +50,14 @@ CONTEXT_LIMIT = 200_000  # Context window limit (used for usage percentage displ
 # ── Context Compression ──
 COMPRESSION_THRESHOLD = 0.7         # Trigger compression when context usage exceeds this ratio
 COMPRESSION_KEEP_RECENT_TURNS = 4   # Number of recent conversation turns to keep uncompressed
-COMPRESSION_MODEL = "openrouter/minimax/minimax-m2.7"  # Cheap model for generating summaries
+COMPRESSION_MODEL = "openrouter/deepseek/deepseek-v4-flash"  # Cheap model for generating summaries
 
 # ── Autonomous Agent (trigger / cron / file-drop subagents) ──
 # Default model when a trigger/cron task has no explicit model set.
 # Deliberately stronger than COMPRESSION_MODEL — autonomous tasks often need
 # real reasoning (email triage, scheduling, file analysis, etc.).
 AUTONOMOUS_AGENT_MODEL = os.getenv(
-    "AUTONOMOUS_AGENT_MODEL", "openrouter/anthropic/claude-sonnet-4.6"
+    "AUTONOMOUS_AGENT_MODEL", "openrouter/deepseek/deepseek-v4-flash"
 )
 
 # ── Tool Output Spill ──
