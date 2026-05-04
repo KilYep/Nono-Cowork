@@ -85,20 +85,15 @@ class DesktopChannel(Channel):
         """Send a status update."""
         self._push_event(user_id, "status", {"text": text})
 
-    def ask_user(self, question: str, options: list[dict] | None = None,
-                 allow_multiple: bool = False) -> str:
-        """Block the agent thread, push an SSE question, wait for the user's answer."""
+    def ask_user(self, questions: list[dict]) -> str:
+        """Block the agent thread, push question(s) via SSE, wait for the user's answer."""
         user_id = DESKTOP_USER_ID
         evt = threading.Event()
         with self._ask_user_lock:
             self._ask_user_events[user_id] = evt
             self._ask_user_answers.pop(user_id, None)
 
-        payload = {"question": question}
-        if options:
-            payload["options"] = options
-            payload["allow_multiple"] = allow_multiple
-        self._push_event(user_id, "ask_user", payload)
+        self._push_event(user_id, "ask_user", {"questions": questions})
 
         from core.session import sessions
         while not evt.wait(timeout=1.0):

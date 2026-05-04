@@ -847,9 +847,7 @@ function App() {
   const [input, setInput] = useState("");
   const [isStreaming, setIsStreaming] = useState(false);
   const [pendingAskUser, setPendingAskUser] = useState<{
-    question: string;
-    options?: { label: string; value?: string }[];
-    allowMultiple?: boolean;
+    questions: { question: string; options: { label: string; description?: string; value?: string }[]; allow_multiple?: boolean }[];
   } | null>(null);
   const [loadingSession, setLoadingSession] = useState(false);
   const [statusText, setStatusText] = useState("");
@@ -1545,9 +1543,11 @@ function App() {
                 updateMsg({ parts: [...currentParts] });
               } else if (eventType === "ask_user") {
                 setPendingAskUser({
-                  question: data.question || "",
-                  options: data.options,
-                  allowMultiple: data.allow_multiple,
+                  questions: data.questions || [{
+                    question: data.question || "",
+                    options: data.options || [],
+                    allow_multiple: data.allow_multiple,
+                  }],
                 });
               } else if (eventType === "reply") {
                 // Backend signals agent-layer failures with a "❌" prefix
@@ -2153,11 +2153,10 @@ function App() {
                 <div className="w-[85%] max-w-5xl mx-auto">
                   {pendingAskUser ? (
                     <AskUserCard
-                      question={pendingAskUser.question}
-                      options={pendingAskUser.options}
-                      allowMultiple={pendingAskUser.allowMultiple}
-                      onSubmit={(answer) => {
+                      questions={pendingAskUser.questions}
+                      onSubmit={(answers) => {
                         setPendingAskUser(null);
+                        const answer = answers.length === 1 ? answers[0] : answers.map((a, i) => `Q${i + 1}: ${a}`).join("\n");
                         fetch(`${API_BASE}/api/ask-reply`, {
                           method: "POST",
                           headers: authHeaders({ "Content-Type": "application/json" }),

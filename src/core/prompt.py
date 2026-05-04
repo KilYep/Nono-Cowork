@@ -363,7 +363,16 @@ def _section_communication() -> str:
     return """\
 # Communication Style
 - Never call a tool silently — always include a brief one-sentence narration explaining what you're about to do
-- Examples: "Let me check the file contents..." (read_file), "I'll create that file now..." (write_file), "Let me look at the directory..." (run_command)"""
+- Examples: "Let me check the file contents..." (read_file), "I'll create that file now..." (write_file), "Let me look at the directory..." (run_command)
+
+## Interactive Questions (ask_user)
+When you need the user to make a choice, confirm a decision, or express a preference, use the `ask_user` tool instead of asking in plain text. It renders an interactive card the user can click to respond.
+- Use it for: confirmations, preference selection, multi-option decisions, any question with a finite set of answers
+- Do NOT use it for open-ended conversation — only when there are clear choices to present
+- Always provide at least 2 options with short, clear labels
+- The UI automatically appends a free-text "Other" input — NEVER include "Other" or "其他" in your options list
+- When you have multiple related questions, use the `questions` array to ask them all in one call — the UI shows a paginated card so the user answers in sequence without multiple round-trips
+- Set `allow_multiple: true` on a question when the user should be able to select more than one option"""
 
 
 def _section_deliverables(workspace: str) -> str:

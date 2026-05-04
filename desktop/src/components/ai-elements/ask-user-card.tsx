@@ -2,7 +2,7 @@
 
 import { cn } from "@/lib/utils";
 import { useState, useCallback, useRef, useEffect } from "react";
-import { Check } from "lucide-react";
+import { Check, ChevronLeft, ChevronRight } from "lucide-react";
 
 interface AskUserOption {
   label: string;
@@ -10,32 +10,68 @@ interface AskUserOption {
   value?: string;
 }
 
-interface AskUserCardProps {
+export interface AskUserQuestion {
   question: string;
-  options?: AskUserOption[];
-  allowMultiple?: boolean;
-  onSubmit: (answer: string) => void;
+  options: AskUserOption[];
+  allow_multiple?: boolean;
+}
+
+interface AskUserCardProps {
+  questions: AskUserQuestion[];
+  onSubmit: (answers: string[]) => void;
   onSkip: () => void;
 }
 
+interface QuestionState {
+  selected: Set<number>;
+  otherText: string;
+}
+
+function buildAnswer(q: AskUserQuestion, state: QuestionState): string {
+  const parts: string[] = [];
+  for (const idx of Array.from(state.selected).sort()) {
+    const opt = q.options[idx];
+    parts.push(opt.value || opt.label);
+  }
+  if (state.otherText.trim()) {
+    parts.push(state.otherText.trim());
+  }
+  return parts.join(", ");
+}
+
 export function AskUserCard({
-  question,
-  options,
-  allowMultiple = false,
+  questions,
   onSubmit,
   onSkip,
 }: AskUserCardProps) {
-  const [selected, setSelected] = useState<Set<number>>(new Set());
-  const [otherText, setOtherText] = useState("");
+  const total = questions.length;
+  const [page, setPage] = useState(0);
+  const [states, setStates] = useState<QuestionState[]>(() =>
+    questions.map(() => ({ selected: new Set(), otherText: "" })),
+  );
   const otherInputRef = useRef<HTMLInputElement>(null);
 
-  const hasOptions = options && options.length > 0;
+  const q = questions[page];
+  const st = states[page];
+  const isLast = page === total - 1;
+  const hasOptions = q.options && q.options.length > 0;
+
+  const updateState = useCallback(
+    (updater: (prev: QuestionState) => QuestionState) => {
+      setStates((prev) => {
+        const next = [...prev];
+        next[page] = updater(prev[page]);
+        return next;
+      });
+    },
+    [page],
+  );
 
   const toggleOption = useCallback(
     (idx: number) => {
-      setSelected((prev) => {
-        const next = new Set(prev);
-        if (allowMultiple) {
+      updateState((prev) => {
+        const next = new Set(prev.selected);
+        if (q.allow_multiple) {
           if (next.has(idx)) next.delete(idx);
           else next.add(idx);
         } else {
@@ -45,68 +81,68 @@ export function AskUserCard({
             next.add(idx);
           }
         }
-        return next;
+        return { ...prev, selected: next };
       });
     },
-    [allowMultiple],
+    [q.allow_multiple, updateState],
   );
 
-  const buildAnswer = useCallback(() => {
-    const parts: string[] = [];
-    if (hasOptions) {
-      for (const idx of Array.from(selected).sort()) {
-        const opt = options![idx];
-        parts.push(opt.value || opt.label);
-      }
-    }
-    if (otherText.trim()) {
-      parts.push(otherText.trim());
-    }
-    return parts.join(", ");
-  }, [hasOptions, options, selected, otherText]);
+  const canSubmitPage = st.selected.size > 0 || st.otherText.trim().length > 0;
 
-  const canSubmit = selected.size > 0 || otherText.trim().length > 0;
+  const handleNext = useCallback(() => {
+    if (!canSubmitPage) return;
+    if (isLast) {
+      const answers = questions.map((qq, i) => buildAnswer(qq, states[i]));
+      onSubmit(answers);
+    } else {
+      setPage((p) => p + 1);
+    }
+  }, [canSubmitPage, isLast, questions, states, onSubmit]);
 
-  const handleSubmit = useCallback(() => {
-    const ans = buildAnswer();
-    if (!ans) return;
-    onSubmit(ans);
-  }, [buildAnswer, onSubmit]);
+  const handleBack = useCallback(() => {
+    if (page > 0) setPage((p) => p - 1);
+  }, [page]);
 
   const handleKeyDown = useCallback(
     (e: React.KeyboardEvent) => {
       if (e.key === "Enter" && !e.shiftKey) {
         e.preventDefault();
-        handleSubmit();
+        handleNext();
       }
     },
-    [handleSubmit],
+    [handleNext],
   );
 
-  // Keyboard shortcut: Cmd/Ctrl+Enter to submit
   useEffect(() => {
     const handler = (e: KeyboardEvent) => {
       if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) {
         e.preventDefault();
-        handleSubmit();
+        handleNext();
       }
     };
     window.addEventListener("keydown", handler);
     return () => window.removeEventListener("keydown", handler);
-  }, [handleSubmit]);
+  }, [handleNext]);
 
   return (
     <div className="rounded-xl border border-border/60 bg-card overflow-hidden shadow-sm">
       {/* Header */}
-      <div className="px-5 pt-4 pb-3">
-        <h4 className="text-[14px] font-bold text-foreground leading-snug">{question}</h4>
+      <div className="px-5 pt-4 pb-3 flex items-start justify-between gap-3">
+        <h4 className="text-[14px] font-bold text-foreground leading-snug">
+          {q.question}
+        </h4>
+        {total > 1 && (
+          <span className="shrink-0 text-[11px] font-medium text-muted-foreground/60 tabular-nums">
+            {page + 1}/{total}
+          </span>
+        )}
       </div>
 
       {/* Options */}
       {hasOptions && (
         <div className="px-4 pb-2 flex flex-col gap-1">
-          {options!.map((opt, idx) => {
-            const isSelected = selected.has(idx);
+          {q.options.map((opt, idx) => {
+            const isSelected = st.selected.has(idx);
             return (
               <button
                 key={idx}
@@ -119,7 +155,6 @@ export function AskUserCard({
                     : "border-transparent hover:bg-muted/50",
                 )}
               >
-                {/* Content */}
                 <div className="flex-1 min-w-0">
                   <div className="text-[13px] font-semibold text-foreground leading-snug">
                     {opt.label}
@@ -131,9 +166,8 @@ export function AskUserCard({
                   )}
                 </div>
 
-                {/* Indicator: numbered badge (single) or checkbox (multi) */}
                 <div className="shrink-0 mt-0.5">
-                  {allowMultiple ? (
+                  {q.allow_multiple ? (
                     <span
                       className={cn(
                         "flex items-center justify-center size-[18px] rounded border transition-colors",
@@ -165,7 +199,7 @@ export function AskUserCard({
           <div
             className={cn(
               "flex items-start gap-3 w-full rounded-lg px-4 py-3 transition-all border",
-              otherText
+              st.otherText
                 ? "border-primary/40 bg-primary/5"
                 : "border-transparent",
             )}
@@ -178,12 +212,14 @@ export function AskUserCard({
                 ref={otherInputRef}
                 type="text"
                 placeholder="Type your own answer here"
-                value={otherText}
+                value={st.otherText}
                 onChange={(e) => {
-                  setOtherText(e.target.value);
-                  if (!allowMultiple && e.target.value) {
-                    setSelected(new Set());
-                  }
+                  const val = e.target.value;
+                  updateState((prev) => ({
+                    ...prev,
+                    otherText: val,
+                    selected: !q.allow_multiple && val ? new Set() : prev.selected,
+                  }));
                 }}
                 onKeyDown={handleKeyDown}
                 className="w-full bg-muted/40 rounded-md px-3 py-1.5 text-[12px] text-foreground placeholder:text-muted-foreground/40 outline-none focus:ring-1 focus:ring-primary/30 transition-shadow"
@@ -191,27 +227,27 @@ export function AskUserCard({
             </div>
 
             <div className="shrink-0 mt-0.5">
-              {allowMultiple ? (
+              {q.allow_multiple ? (
                 <span
                   className={cn(
                     "flex items-center justify-center size-[18px] rounded border transition-colors",
-                    otherText
+                    st.otherText
                       ? "border-primary bg-primary text-primary-foreground"
                       : "border-muted-foreground/30",
                   )}
                 >
-                  {otherText && <Check className="size-3" strokeWidth={3} />}
+                  {st.otherText && <Check className="size-3" strokeWidth={3} />}
                 </span>
               ) : (
                 <span
                   className={cn(
                     "flex items-center justify-center size-[22px] rounded-md text-[11px] font-bold transition-colors",
-                    otherText
+                    st.otherText
                       ? "bg-primary text-primary-foreground"
                       : "bg-muted/60 text-muted-foreground",
                   )}
                 >
-                  {(options?.length ?? 0) + 1}
+                  {(q.options?.length ?? 0) + 1}
                 </span>
               )}
             </div>
@@ -221,7 +257,18 @@ export function AskUserCard({
 
       {/* Footer */}
       <div className="flex items-center justify-between px-5 py-3 border-t border-border/30">
-        <div />
+        <div>
+          {total > 1 && page > 0 && (
+            <button
+              type="button"
+              onClick={handleBack}
+              className="flex items-center gap-1 px-2 py-1.5 text-[12px] font-medium text-muted-foreground hover:text-foreground rounded-md hover:bg-muted/60 transition-colors cursor-pointer"
+            >
+              <ChevronLeft className="size-3.5" />
+              Back
+            </button>
+          )}
+        </div>
         <div className="flex items-center gap-3">
           <button
             type="button"
@@ -232,16 +279,21 @@ export function AskUserCard({
           </button>
           <button
             type="button"
-            onClick={handleSubmit}
-            disabled={!canSubmit}
+            onClick={handleNext}
+            disabled={!canSubmitPage}
             className={cn(
-              "flex items-center gap-2 px-3 py-1.5 text-[12px] font-medium rounded-md transition-colors",
-              canSubmit
+              "flex items-center gap-1 px-3 py-1.5 text-[12px] font-medium rounded-md transition-colors",
+              canSubmitPage
                 ? "text-foreground/80 hover:text-foreground hover:bg-muted/60 cursor-pointer"
                 : "text-muted-foreground/30 cursor-not-allowed",
             )}
           >
-            Submit
+            {isLast ? "Submit" : (
+              <>
+                Next
+                <ChevronRight className="size-3.5" />
+              </>
+            )}
           </button>
         </div>
       </div>
