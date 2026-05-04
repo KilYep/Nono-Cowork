@@ -202,15 +202,15 @@ export function AskUserCard({
       </div>
 
       {/* Footer */}
-      {hasOptions && (
-        <div className="flex items-center justify-end gap-2 px-4 py-2.5 border-t border-border/40 bg-muted/10">
-          <button
-            type="button"
-            onClick={onSkip}
-            className="px-3 py-1 text-[12px] font-medium text-muted-foreground hover:text-foreground rounded-md hover:bg-muted/60 transition-colors cursor-pointer"
-          >
-            Skip
-          </button>
+      <div className="flex items-center justify-end gap-2 px-4 py-2.5 border-t border-border/40 bg-muted/10">
+        <button
+          type="button"
+          onClick={onSkip}
+          className="px-3 py-1 text-[12px] font-medium text-muted-foreground hover:text-foreground rounded-md hover:bg-muted/60 transition-colors cursor-pointer"
+        >
+          Skip
+        </button>
+        {hasOptions && (
           <button
             type="button"
             onClick={handleSubmit}
@@ -225,8 +225,8 @@ export function AskUserCard({
             Submit
             <kbd className="text-[10px] text-muted-foreground/50 font-mono">Enter</kbd>
           </button>
-        </div>
-      )}
+        )}
+      </div>
     </div>
   );
 }

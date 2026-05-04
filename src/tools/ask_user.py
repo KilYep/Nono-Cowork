@@ -11,17 +11,20 @@ from tools.registry import tool
 @tool(
     name="ask_user",
     description=(
-        "Ask the user a question and wait for their response. "
-        "Use this when you need clarification, confirmation, or additional input before proceeding. "
-        "The agent loop pauses until the user replies. "
-        "You can optionally provide a list of options for the user to choose from."
+        "Present the user with a question and selectable options, then wait for their choice. "
+        "This tool renders an interactive card that REPLACES the chat input box — "
+        "the user clicks an option instead of typing. "
+        "You MUST always provide at least 2 options. The UI automatically appends "
+        "a free-text 'Other' field so the user can type a custom answer. "
+        "Use this for confirmations, preference gathering, or any decision point. "
+        "Do NOT use this as a general-purpose text input — it is for structured choices."
     ),
     parameters={
         "type": "object",
         "properties": {
             "question": {
                 "type": "string",
-                "description": "The question to ask the user.",
+                "description": "A short, focused question. One question per call.",
             },
             "options": {
                 "type": "array",
@@ -39,17 +42,15 @@ from tools.registry import tool
                     },
                     "required": ["label"],
                 },
-                "description": (
-                    "Optional list of choices. When provided, renders as selectable options. "
-                    "An 'Other' free-text option is always appended automatically."
-                ),
+                "minItems": 2,
+                "description": "List of choices (minimum 2). Keep labels short. An 'Other' free-text option is always appended automatically.",
             },
             "allow_multiple": {
                 "type": "boolean",
                 "description": "If true, user can select multiple options (checkboxes). Default: false (single-select).",
             },
         },
-        "required": ["question"],
+        "required": ["question", "options"],
     },
     tags=["read"],
 )
