@@ -141,6 +141,7 @@ import {
   extractComposioToolkits,
 } from "@/components/ai-elements/tool";
 import { SearchToolCall } from "@/components/ai-elements/search-tool";
+import { AskUserCard } from "@/components/ai-elements/ask-user-card";
 import { useScrollAnchor } from "@/components/ai-elements/use-scroll-anchor";
 import { Sidebar, type SessionItem, type SidebarView, type WorkspaceItem } from "@/components/sidebar";
 import { NewWorkspaceDialog } from "@/components/new-workspace-dialog";
@@ -228,7 +229,8 @@ type MessagePart =
   | { type: "text"; content: string }
   | { type: "reasoning"; content: string }
   | { type: "tool_call"; toolName?: string; args?: Record<string, unknown>; round: number; description?: string }
-  | { type: "tool_result"; toolName?: string; result?: string; round: number };
+  | { type: "tool_result"; toolName?: string; result?: string; round: number }
+  | { type: "ask_user"; question: string; options?: { label: string; value?: string }[]; allowMultiple?: boolean; answered?: boolean; answer?: string };
 
 interface ChatMessage {
   id: string;
@@ -594,11 +596,13 @@ function PartsRenderer({
   isActive,
   isStreaming,
   defaultCollapsed: _defaultCollapsed = false,
+  onPartsChanged,
 }: {
   parts: MessagePart[];
   isActive: boolean;
   isStreaming?: boolean;
   defaultCollapsed?: boolean;
+  onPartsChanged?: () => void;
 }) {
   // First pass: build a flat list of typed items (reasoning, text, tool nodes)
   type ItemNode = { kind: "reasoning" | "text" | "tool" | "search-tool"; node: React.ReactNode; round?: number; toolName?: string; args?: Record<string, unknown> };
@@ -749,6 +753,46 @@ function PartsRenderer({
       }
 
       i = hasResult ? i + 2 : i + 1;
+      continue;
+    }
+
+    if (part.type === "ask_user") {
+      flatItems.push({
+        kind: "text",
+        node: (
+          <AskUserCard
+            key={`ask-${i}`}
+            question={part.question}
+            options={part.type === "ask_user" ? part.options : undefined}
+            allowMultiple={part.type === "ask_user" ? part.allowMultiple : undefined}
+            answered={part.answered}
+            answer={part.answer}
+            onSubmit={(answer) => {
+              const p = part as Extract<MessagePart, { type: "ask_user" }>;
+              p.answered = true;
+              p.answer = answer;
+              fetch(`${API_BASE}/api/ask-reply`, {
+                method: "POST",
+                headers: authHeaders({ "Content-Type": "application/json" }),
+                body: JSON.stringify({ answer }),
+              }).catch(() => {});
+              onPartsChanged?.();
+            }}
+            onSkip={() => {
+              const p = part as Extract<MessagePart, { type: "ask_user" }>;
+              p.answered = true;
+              p.answer = "(skipped)";
+              fetch(`${API_BASE}/api/ask-reply`, {
+                method: "POST",
+                headers: authHeaders({ "Content-Type": "application/json" }),
+                body: JSON.stringify({ answer: "(skipped)" }),
+              }).catch(() => {});
+              onPartsChanged?.();
+            }}
+          />
+        ),
+      });
+      i++;
       continue;
     }
 
@@ -1537,6 +1581,15 @@ function App() {
                 });
                 setThinkingMsgId(assistantId);
                 updateMsg({ parts: [...currentParts] });
+              } else if (eventType === "ask_user") {
+                currentParts.push({
+                  type: "ask_user",
+                  question: data.question || "",
+                  options: data.options,
+                  allowMultiple: data.allow_multiple,
+                });
+                setThinkingMsgId(null);
+                updateMsg({ parts: [...currentParts] });
               } else if (eventType === "reply") {
                 // Backend signals agent-layer failures with a "❌" prefix
                 // (e.g. "❌ Execution error: LLM stream went silent…").
@@ -2055,6 +2108,7 @@ function App() {
                                       isActive={msg.id === thinkingMsgId}
                                       isStreaming={isStreaming}
                                       defaultCollapsed={msg.id.startsWith("hist-")}
+                                      onPartsChanged={() => setMessages((prev) => [...prev])}
                                     />
                                   )}
                                 </>

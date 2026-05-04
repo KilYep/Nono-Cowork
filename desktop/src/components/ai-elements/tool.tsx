@@ -78,6 +78,8 @@ const TOOL_DISPLAY_NAMES: Record<string, [string, string]> = {
   // Composio
   composio_list_triggers:                   ["Listing triggers",  "Listed triggers"],
   composio_wait_for_connection:             ["Connecting",        "Connected"],
+  // Interactive
+  ask_user:                                 ["Asking",            "Asked"],
   // Delivery (hidden from UI, but included for completeness)
   report_result:                            ["Reporting",         "Reported"],
 };

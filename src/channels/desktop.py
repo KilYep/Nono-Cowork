@@ -54,6 +54,10 @@ class DesktopChannel(Channel):
     def __init__(self):
         self._event_queues: dict[str, queue.Queue] = {}
         self._queue_lock = threading.Lock()
+        # ask_user support: per-user answer slot + event signal
+        self._ask_user_events: dict[str, threading.Event] = {}
+        self._ask_user_answers: dict[str, str] = {}
+        self._ask_user_lock = threading.Lock()
 
     def _get_queue(self, user_id: str) -> queue.Queue:
         """Get or create an event queue for a user."""
@@ -80,6 +84,42 @@ class DesktopChannel(Channel):
     def send_status(self, user_id: str, text: str):
         """Send a status update."""
         self._push_event(user_id, "status", {"text": text})
+
+    def ask_user(self, question: str, options: list[dict] | None = None,
+                 allow_multiple: bool = False) -> str:
+        """Block the agent thread, push an SSE question, wait for the user's answer."""
+        user_id = DESKTOP_USER_ID
+        evt = threading.Event()
+        with self._ask_user_lock:
+            self._ask_user_events[user_id] = evt
+            self._ask_user_answers.pop(user_id, None)
+
+        payload = {"question": question}
+        if options:
+            payload["options"] = options
+            payload["allow_multiple"] = allow_multiple
+        self._push_event(user_id, "ask_user", payload)
+
+        from core.session import sessions
+        while not evt.wait(timeout=1.0):
+            if sessions.is_stopped(user_id):
+                with self._ask_user_lock:
+                    self._ask_user_events.pop(user_id, None)
+                return "[User stopped the task]"
+
+        with self._ask_user_lock:
+            self._ask_user_events.pop(user_id, None)
+            return self._ask_user_answers.pop(user_id, "")
+
+    def submit_ask_reply(self, user_id: str, answer: str):
+        """Called by /api/ask-reply to unblock a waiting ask_user."""
+        with self._ask_user_lock:
+            evt = self._ask_user_events.get(user_id)
+            if not evt:
+                return False
+            self._ask_user_answers[user_id] = answer
+            evt.set()
+            return True
 
     def dispatch_and_stream(self, user_id: str, user_text: str, images: list[dict] | None = None):
         """Dispatch the message and signal 'done' when the agent finishes.
@@ -315,6 +355,20 @@ async def chat(request: Request):
                 break
 
     return EventSourceResponse(event_generator())
+
+
+@app.post("/api/ask-reply")
+async def ask_reply(request: Request):
+    """Submit an answer to a pending ask_user question.
+
+    Request body: {"answer": "user's reply text"}
+    """
+    body = await request.json()
+    answer = body.get("answer", "")
+    ok = channel.submit_ask_reply(DESKTOP_USER_ID, answer)
+    if not ok:
+        return JSONResponse({"error": "No pending question"}, status_code=409)
+    return {"status": "ok"}
 
 
 # ── RESTful: Session Management ──
