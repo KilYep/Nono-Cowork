@@ -13,8 +13,6 @@ interface AskUserCardProps {
   question: string;
   options?: AskUserOption[];
   allowMultiple?: boolean;
-  answered?: boolean;
-  answer?: string;
   onSubmit: (answer: string) => void;
   onSkip: () => void;
 }
@@ -23,8 +21,6 @@ export function AskUserCard({
   question,
   options,
   allowMultiple = false,
-  answered = false,
-  answer,
   onSubmit,
   onSkip,
 }: AskUserCardProps) {
@@ -38,7 +34,6 @@ export function AskUserCard({
 
   const toggleOption = useCallback(
     (idx: number) => {
-      if (answered) return;
       setSelected((prev) => {
         const next = new Set(prev);
         if (allowMultiple) {
@@ -54,7 +49,7 @@ export function AskUserCard({
         return next;
       });
     },
-    [allowMultiple, answered],
+    [allowMultiple],
   );
 
   const buildAnswer = useCallback(() => {
@@ -72,11 +67,10 @@ export function AskUserCard({
   }, [hasOptions, options, selected, otherText]);
 
   const handleSubmit = useCallback(() => {
-    if (answered) return;
     const ans = hasOptions ? buildAnswer() : (freeInputRef.current?.value || "").trim();
     if (!ans) return;
     onSubmit(ans);
-  }, [answered, hasOptions, buildAnswer, onSubmit]);
+  }, [hasOptions, buildAnswer, onSubmit]);
 
   const handleKeyDown = useCallback(
     (e: React.KeyboardEvent) => {
@@ -88,24 +82,11 @@ export function AskUserCard({
     [handleSubmit],
   );
 
-  // Auto-focus free input when no options
   useEffect(() => {
-    if (!hasOptions && !answered && freeInputRef.current) {
+    if (!hasOptions && freeInputRef.current) {
       freeInputRef.current.focus();
     }
-  }, [hasOptions, answered]);
-
-  if (answered) {
-    return (
-      <div className="flex items-start gap-2 py-2 px-3 rounded-lg bg-muted/30 border border-border/40">
-        <MessageCircleQuestion className="size-4 text-muted-foreground mt-0.5 shrink-0" />
-        <div className="flex flex-col gap-0.5 min-w-0">
-          <span className="text-[13px] text-muted-foreground">{question}</span>
-          <span className="text-[13px] font-medium text-foreground">{answer}</span>
-        </div>
-      </div>
-    );
-  }
+  }, [hasOptions]);
 
   return (
     <div className="rounded-lg border border-border/60 bg-card overflow-hidden">
@@ -133,7 +114,6 @@ export function AskUserCard({
                       : "border-border/40 bg-transparent hover:bg-muted/40",
                   )}
                 >
-                  {/* Radio / Checkbox indicator */}
                   <span
                     className={cn(
                       "shrink-0 flex items-center justify-center transition-colors",

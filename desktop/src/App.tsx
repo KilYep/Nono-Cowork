@@ -229,8 +229,7 @@ type MessagePart =
   | { type: "text"; content: string }
   | { type: "reasoning"; content: string }
   | { type: "tool_call"; toolName?: string; args?: Record<string, unknown>; round: number; description?: string }
-  | { type: "tool_result"; toolName?: string; result?: string; round: number }
-  | { type: "ask_user"; question: string; options?: { label: string; value?: string }[]; allowMultiple?: boolean; answered?: boolean; answer?: string };
+  | { type: "tool_result"; toolName?: string; result?: string; round: number };
 
 interface ChatMessage {
   id: string;
@@ -596,13 +595,11 @@ function PartsRenderer({
   isActive,
   isStreaming,
   defaultCollapsed: _defaultCollapsed = false,
-  onPartsChanged,
 }: {
   parts: MessagePart[];
   isActive: boolean;
   isStreaming?: boolean;
   defaultCollapsed?: boolean;
-  onPartsChanged?: () => void;
 }) {
   // First pass: build a flat list of typed items (reasoning, text, tool nodes)
   type ItemNode = { kind: "reasoning" | "text" | "tool" | "search-tool"; node: React.ReactNode; round?: number; toolName?: string; args?: Record<string, unknown> };
@@ -756,46 +753,6 @@ function PartsRenderer({
       continue;
     }
 
-    if (part.type === "ask_user") {
-      flatItems.push({
-        kind: "text",
-        node: (
-          <AskUserCard
-            key={`ask-${i}`}
-            question={part.question}
-            options={part.type === "ask_user" ? part.options : undefined}
-            allowMultiple={part.type === "ask_user" ? part.allowMultiple : undefined}
-            answered={part.answered}
-            answer={part.answer}
-            onSubmit={(answer) => {
-              const p = part as Extract<MessagePart, { type: "ask_user" }>;
-              p.answered = true;
-              p.answer = answer;
-              fetch(`${API_BASE}/api/ask-reply`, {
-                method: "POST",
-                headers: authHeaders({ "Content-Type": "application/json" }),
-                body: JSON.stringify({ answer }),
-              }).catch(() => {});
-              onPartsChanged?.();
-            }}
-            onSkip={() => {
-              const p = part as Extract<MessagePart, { type: "ask_user" }>;
-              p.answered = true;
-              p.answer = "(skipped)";
-              fetch(`${API_BASE}/api/ask-reply`, {
-                method: "POST",
-                headers: authHeaders({ "Content-Type": "application/json" }),
-                body: JSON.stringify({ answer: "(skipped)" }),
-              }).catch(() => {});
-              onPartsChanged?.();
-            }}
-          />
-        ),
-      });
-      i++;
-      continue;
-    }
-
     // Skip standalone tool_result
     i++;
   }
@@ -889,6 +846,11 @@ function App() {
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [input, setInput] = useState("");
   const [isStreaming, setIsStreaming] = useState(false);
+  const [pendingAskUser, setPendingAskUser] = useState<{
+    question: string;
+    options?: { label: string; value?: string }[];
+    allowMultiple?: boolean;
+  } | null>(null);
   const [loadingSession, setLoadingSession] = useState(false);
   const [statusText, setStatusText] = useState("");
   const [sessionStatus, setSessionStatus] = useState<SessionStatus>({
@@ -1582,14 +1544,11 @@ function App() {
                 setThinkingMsgId(assistantId);
                 updateMsg({ parts: [...currentParts] });
               } else if (eventType === "ask_user") {
-                currentParts.push({
-                  type: "ask_user",
+                setPendingAskUser({
                   question: data.question || "",
                   options: data.options,
                   allowMultiple: data.allow_multiple,
                 });
-                setThinkingMsgId(null);
-                updateMsg({ parts: [...currentParts] });
               } else if (eventType === "reply") {
                 // Backend signals agent-layer failures with a "❌" prefix
                 // (e.g. "❌ Execution error: LLM stream went silent…").
@@ -1629,6 +1588,7 @@ function App() {
     } finally {
       setIsStreaming(false);
       setIsStopping(false);
+      setPendingAskUser(null);
       setAnimatingMsgId(null);
       setThinkingMsgId(null);
       setStatusText("");
@@ -2108,7 +2068,6 @@ function App() {
                                       isActive={msg.id === thinkingMsgId}
                                       isStreaming={isStreaming}
                                       defaultCollapsed={msg.id.startsWith("hist-")}
-                                      onPartsChanged={() => setMessages((prev) => [...prev])}
                                     />
                                   )}
                                 </>
@@ -2192,6 +2151,29 @@ function App() {
                   <div className="w-[85%] max-w-5xl h-full bg-gradient-to-t from-background to-transparent" />
                 </div>
                 <div className="w-[85%] max-w-5xl mx-auto">
+                  {pendingAskUser ? (
+                    <AskUserCard
+                      question={pendingAskUser.question}
+                      options={pendingAskUser.options}
+                      allowMultiple={pendingAskUser.allowMultiple}
+                      onSubmit={(answer) => {
+                        setPendingAskUser(null);
+                        fetch(`${API_BASE}/api/ask-reply`, {
+                          method: "POST",
+                          headers: authHeaders({ "Content-Type": "application/json" }),
+                          body: JSON.stringify({ answer }),
+                        }).catch(() => {});
+                      }}
+                      onSkip={() => {
+                        setPendingAskUser(null);
+                        fetch(`${API_BASE}/api/ask-reply`, {
+                          method: "POST",
+                          headers: authHeaders({ "Content-Type": "application/json" }),
+                          body: JSON.stringify({ answer: "(skipped)" }),
+                        }).catch(() => {});
+                      }}
+                    />
+                  ) : (
                   <PromptInput
                     onSubmit={handlePromptSubmit}
                     accept="image/*"
@@ -2323,6 +2305,7 @@ function App() {
                       </div>
                     </PromptInputFooter>
                   </PromptInput>
+                  )}
                 </div>
               </div>
             </>
