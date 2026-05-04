@@ -33,7 +33,11 @@ from tools.registry import tool
                     "properties": {
                         "label": {
                             "type": "string",
-                            "description": "The option label shown to the user.",
+                            "description": "The option title shown to the user.",
+                        },
+                        "description": {
+                            "type": "string",
+                            "description": "Optional one-line subtitle explaining the option.",
                         },
                         "value": {
                             "type": "string",
@@ -47,7 +51,7 @@ from tools.registry import tool
             },
             "allow_multiple": {
                 "type": "boolean",
-                "description": "If true, user can select multiple options (checkboxes). Default: false (single-select).",
+                "description": "If true, user can select multiple options (checkboxes). Default: false (single-select with numbered badges).",
             },
         },
         "required": ["question", "options"],
