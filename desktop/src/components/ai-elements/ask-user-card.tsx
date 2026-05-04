@@ -242,12 +242,6 @@ export function AskUserCard({
             )}
           >
             Submit
-            <kbd className={cn(
-              "text-[10px] font-mono px-1 py-0.5 rounded border transition-colors",
-              canSubmit
-                ? "border-border/60 text-muted-foreground/60"
-                : "border-border/20 text-muted-foreground/20",
-            )}>⌘↵</kbd>
           </button>
         </div>
       </div>
