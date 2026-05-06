@@ -9,9 +9,20 @@ from bs4 import BeautifulSoup
 from markdownify import markdownify as md
 from ddgs import DDGS
 from tools.registry import tool
-from config import JINA_API_KEY
+from config import JINA_API_KEY as _ENV_JINA_KEY
 
 logger = logging.getLogger("tools.web")
+
+
+def _get_jina_key() -> str:
+    """Get Jina API key: env var first, then credential store fallback."""
+    if _ENV_JINA_KEY:
+        return _ENV_JINA_KEY
+    try:
+        from credential_store import get_credential
+        return get_credential("JINA_API_KEY") or ""
+    except Exception:
+        return ""
 
 # ── Jina Reader fallback ────────────────────────────────────────
 # When a normal fetch yields very little content (SPA / JS-rendered
@@ -57,8 +68,9 @@ def _build_jina_headers() -> dict:
         "Accept": "text/markdown",
         "User-Agent": "Mozilla/5.0 (compatible; NonoCowork/1.0)",
     }
-    if JINA_API_KEY:
-        h["Authorization"] = f"Bearer {JINA_API_KEY}"
+    key = _get_jina_key()
+    if key:
+        h["Authorization"] = f"Bearer {key}"
     return h
 
 
@@ -71,7 +83,7 @@ def _format_jina_error(url: str, reason: str, status_code: int = 0,
         f"(which can render dynamic pages) also failed: "
     )
 
-    has_key = bool(JINA_API_KEY)
+    has_key = bool(_get_jina_key())
     key_hint = (
         "Get a free API key at https://jina.ai/reader and set the "
         "JINA_API_KEY environment variable — even the free plan has "

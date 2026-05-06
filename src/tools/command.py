@@ -57,6 +57,20 @@ def run_command(command: str, cwd: str = "~") -> str:
     os.makedirs(staging_dir, exist_ok=True)
     env["STAGING_DIR"] = staging_dir
 
+    # Inject user-provided credentials as environment variables so the
+    # agent can reference them as $KEY_NAME without seeing the plaintext.
+    _credential_values = []
+    try:
+        from credential_store import list_credentials, get_credential
+        for cred in list_credentials():
+            name = cred["name"]
+            value = get_credential(name)
+            if value:
+                env[name] = value
+                _credential_values.append(value)
+    except Exception:
+        pass
+
     try:
         proc = subprocess.Popen(
             command, shell=True, cwd=cwd, env=env,
@@ -74,7 +88,7 @@ def run_command(command: str, cwd: str = "~") -> str:
             output_lines.append(line)
     threading.Thread(target=_reader, daemon=True).start()
 
-    _bg_processes[proc.pid] = {"proc": proc, "output": output_lines}
+    _bg_processes[proc.pid] = {"proc": proc, "output": output_lines, "secrets": _credential_values}
 
     # Poll until done
     start = time.time()
@@ -82,6 +96,12 @@ def run_command(command: str, cwd: str = "~") -> str:
         if proc.poll() is not None:
             break
         time.sleep(0.5)
+
+    def _redact(text: str) -> str:
+        for secret in _credential_values:
+            if secret and secret in text:
+                text = text.replace(secret, "[REDACTED]")
+        return text
 
     # Finished within 120s → return raw result (trimmer handles sizing)
     if proc.poll() is not None:
@@ -92,7 +112,7 @@ def run_command(command: str, cwd: str = "~") -> str:
         if proc.returncode != 0:
             output += f"\n(exit code: {proc.returncode})"
 
-        return output
+        return _redact(output)
 
     # Not finished within 120s → return PID
     return (
@@ -125,13 +145,20 @@ def check_command_status(pid: int) -> str:
 
     proc = info["proc"]
     output_lines = info["output"]
+    secrets = info.get("secrets", [])
     output = "".join(output_lines)
     total_lines = len(output_lines)
+
+    def _redact(text: str) -> str:
+        for secret in secrets:
+            if secret and secret in text:
+                text = text.replace(secret, "[REDACTED]")
+        return text
 
     if not output.strip():
         output_display = "(no output yet)"
     else:
-        output_display = output
+        output_display = _redact(output)
 
     if proc.poll() is None:
         return (

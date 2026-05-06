@@ -430,6 +430,39 @@ def _section_safety(workspace: str) -> str:
 - For deletions affecting more than 5 files, list them first and ask for confirmation"""
 
 
+def _section_credentials() -> str:
+    """Inject credential store awareness and list configured keys."""
+    try:
+        from credential_store import list_credentials
+        creds = list_credentials()
+    except Exception:
+        creds = []
+
+    lines = [
+        "# Credential Store (API Keys)",
+        "User-provided API keys are encrypted and stored locally. You have two tools:",
+        "- `credential_check(key_name)` — check if a key exists (returns configured / not_configured)",
+        "- `credential_request(key_name, service_name, service_description)` — ask the user to provide a key via a secure input card",
+        "",
+        "When you want to use a third-party service that requires an API key:",
+        "1. Use `credential_check` to see if the key already exists",
+        "2. If not, explain to the user why you need it, then call `credential_request`",
+        "3. In run_command, reference the key as an environment variable: `$KEY_NAME` (e.g., `$SERPER_API_KEY`). "
+        "All stored credentials are automatically injected into the command environment. "
+        "You never need to — and must not try to — read or print the plaintext key.",
+        "",
+        "IMPORTANT: Never ask the user to paste API keys in the chat. Always use credential_request.",
+    ]
+
+    if creds:
+        lines.append("")
+        lines.append("Currently configured credentials:")
+        for c in creds:
+            lines.append(f"  - {c['name']} ({c['preview']})")
+
+    return "\n".join(lines)
+
+
 def _section_context() -> str:
     return f"""\
 # Context
@@ -488,6 +521,7 @@ def make_system_prompt(workspace_id: str | None = None) -> str:
         _section_deliverables(workspace),
         _section_work_habits(),
         _section_safety(workspace),
+        _section_credentials(),
         _section_context(),
         _section_memory(),
     ]
