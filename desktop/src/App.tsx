@@ -142,6 +142,7 @@ import {
 } from "@/components/ai-elements/tool";
 import { SearchToolCall } from "@/components/ai-elements/search-tool";
 import { AskUserCard } from "@/components/ai-elements/ask-user-card";
+import { CredentialCard } from "@/components/ai-elements/credential-card";
 import { useScrollAnchor } from "@/components/ai-elements/use-scroll-anchor";
 import { Sidebar, type SessionItem, type SidebarView, type WorkspaceItem } from "@/components/sidebar";
 import { NewWorkspaceDialog } from "@/components/new-workspace-dialog";
@@ -849,6 +850,9 @@ function App() {
   const [pendingAskUser, setPendingAskUser] = useState<{
     questions: { question: string; options: { label: string; description?: string; value?: string }[]; allow_multiple?: boolean }[];
   } | null>(null);
+  const [pendingCredential, setPendingCredential] = useState<{
+    keyName: string; serviceName: string; serviceDescription: string;
+  } | null>(null);
   const [loadingSession, setLoadingSession] = useState(false);
   const [statusText, setStatusText] = useState("");
   const [sessionStatus, setSessionStatus] = useState<SessionStatus>({
@@ -1549,6 +1553,12 @@ function App() {
                     allow_multiple: data.allow_multiple,
                   }],
                 });
+              } else if (eventType === "credential_request") {
+                setPendingCredential({
+                  keyName: data.key_name,
+                  serviceName: data.service_name,
+                  serviceDescription: data.service_description,
+                });
               } else if (eventType === "reply") {
                 // Backend signals agent-layer failures with a "❌" prefix
                 // (e.g. "❌ Execution error: LLM stream went silent…").
@@ -2169,6 +2179,28 @@ function App() {
                           method: "POST",
                           headers: authHeaders({ "Content-Type": "application/json" }),
                           body: JSON.stringify({ answer: "(skipped)" }),
+                        }).catch(() => {});
+                      }}
+                    />
+                  ) : pendingCredential ? (
+                    <CredentialCard
+                      keyName={pendingCredential.keyName}
+                      serviceName={pendingCredential.serviceName}
+                      serviceDescription={pendingCredential.serviceDescription}
+                      onSubmit={(value) => {
+                        setPendingCredential(null);
+                        fetch(`${API_BASE}/api/credential-submit`, {
+                          method: "POST",
+                          headers: authHeaders({ "Content-Type": "application/json" }),
+                          body: JSON.stringify({ value }),
+                        }).catch(() => {});
+                      }}
+                      onSkip={() => {
+                        setPendingCredential(null);
+                        fetch(`${API_BASE}/api/credential-submit`, {
+                          method: "POST",
+                          headers: authHeaders({ "Content-Type": "application/json" }),
+                          body: JSON.stringify({ value: "(skipped)" }),
                         }).catch(() => {});
                       }}
                     />

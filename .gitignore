@@ -11,6 +11,7 @@ wheels/
 
 # Secrets
 .env
+.env.credentials
 
 # Logs
 logs/
@@ -64,3 +65,5 @@ notes/
 .stignore
 
 .stfolder/
+
+websitenew/

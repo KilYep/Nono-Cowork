@@ -80,6 +80,9 @@ const TOOL_DISPLAY_NAMES: Record<string, [string, string]> = {
   composio_wait_for_connection:             ["Connecting",        "Connected"],
   // Interactive
   ask_user:                                 ["Asking",            "Asked"],
+  // Credentials
+  credential_check:                         ["Checking key",      "Checked key"],
+  credential_request:                       ["Requesting key",    "Requested key"],
   // Delivery (hidden from UI, but included for completeness)
   report_result:                            ["Reporting",         "Reported"],
 };

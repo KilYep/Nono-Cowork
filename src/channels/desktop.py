@@ -58,6 +58,10 @@ class DesktopChannel(Channel):
         self._ask_user_events: dict[str, threading.Event] = {}
         self._ask_user_answers: dict[str, str] = {}
         self._ask_user_lock = threading.Lock()
+        # credential_request support: reuses same blocking pattern
+        self._credential_events: dict[str, threading.Event] = {}
+        self._credential_answers: dict[str, str] = {}
+        self._credential_lock = threading.Lock()
 
     def _get_queue(self, user_id: str) -> queue.Queue:
         """Get or create an event queue for a user."""
@@ -113,6 +117,48 @@ class DesktopChannel(Channel):
             if not evt:
                 return False
             self._ask_user_answers[user_id] = answer
+            evt.set()
+            return True
+
+    def credential_request(self, key_name: str, service_name: str, service_description: str) -> str:
+        """Block the agent thread, push credential request via SSE, wait for user input."""
+        user_id = DESKTOP_USER_ID
+        evt = threading.Event()
+        with self._credential_lock:
+            self._credential_events[user_id] = evt
+            self._credential_answers.pop(user_id, None)
+
+        self._push_event(user_id, "credential_request", {
+            "key_name": key_name,
+            "service_name": service_name,
+            "service_description": service_description,
+        })
+
+        from core.session import sessions
+        while not evt.wait(timeout=1.0):
+            if sessions.is_stopped(user_id):
+                with self._credential_lock:
+                    self._credential_events.pop(user_id, None)
+                return "[User stopped the task]"
+
+        with self._credential_lock:
+            self._credential_events.pop(user_id, None)
+            result = self._credential_answers.pop(user_id, "")
+
+        if result == "(skipped)":
+            return f"User skipped providing {key_name}."
+
+        from credential_store import set_credential
+        set_credential(key_name, result)
+        return f"✓ {key_name} has been saved securely."
+
+    def submit_credential_reply(self, user_id: str, value: str):
+        """Called by /api/credential-submit to unblock a waiting credential_request."""
+        with self._credential_lock:
+            evt = self._credential_events.get(user_id)
+            if not evt:
+                return False
+            self._credential_answers[user_id] = value
             evt.set()
             return True
 
@@ -363,6 +409,33 @@ async def ask_reply(request: Request):
     ok = channel.submit_ask_reply(DESKTOP_USER_ID, answer)
     if not ok:
         return JSONResponse({"error": "No pending question"}, status_code=409)
+    return {"status": "ok"}
+
+
+@app.post("/api/credential-submit")
+async def credential_submit(request: Request):
+    """Submit an API key from the credential input card."""
+    body = await request.json()
+    value = body.get("value", "")
+    ok = channel.submit_credential_reply(DESKTOP_USER_ID, value)
+    if not ok:
+        return JSONResponse({"error": "No pending credential request"}, status_code=409)
+    return {"status": "ok"}
+
+
+@app.get("/api/credentials")
+async def list_credentials():
+    """List all stored credentials (names + masked previews only)."""
+    from credential_store import list_credentials
+    return {"credentials": list_credentials()}
+
+
+@app.delete("/api/credentials/{key_name}")
+async def delete_credential(key_name: str):
+    """Delete a stored credential."""
+    from credential_store import delete_credential as del_cred
+    if not del_cred(key_name):
+        return JSONResponse({"error": "Credential not found"}, status_code=404)
     return {"status": "ok"}
 
 
