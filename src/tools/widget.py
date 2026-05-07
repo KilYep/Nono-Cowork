@@ -41,12 +41,16 @@ axisTick:  { show: false },
 splitLine: { lineStyle: { color: T.grid } },
 axisLabel: { color: T.sub, fontSize: 11 },
 
-━━ TITLE (only when necessary) ━━
-textStyle: { fontSize: 13, fontWeight: 'normal', color: T.text }, left: 'left', top: 12,
+━━ LAYOUT — title / legend / grid must not overlap ━━
+Title:  { left: 16, top: 16, textStyle: { fontSize: 13, fontWeight: 'normal', color: T.text } }
+Legend: { top: 16, right: 16, icon: 'circle', itemWidth: 7, itemHeight: 7, textStyle: { color: T.sub, fontSize: 11 } }
+Grid:   { left: 16, right: 16, top: 56, bottom: 12, containLabel: true }
+  — top:56 leaves room for title+legend on the same row without collision
+  — use containLabel:true so axis labels never clip at the edges
 
-━━ LEGEND ━━
-icon: 'circle', itemWidth: 7, itemHeight: 7,
-textStyle: { color: T.sub, fontSize: 11 }, top: 12,
+Y-axis units: put the unit inside axisLabel formatter (e.g. formatter: '${value}')
+  NEVER use yAxis.name placed at top — it collides with the title.
+  If two y-axes are needed, place names at nameLocation:'middle', nameRotate:90, nameGap:40.
 
 ━━ TOOLTIP ━━
 backgroundColor: T.ttBg, borderColor: T.ttBd, borderWidth: 0.5,
