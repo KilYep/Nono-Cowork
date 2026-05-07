@@ -26,7 +26,7 @@ const T = {
 ['#6366f1','#34d399','#fbbf24','#f87171','#a78bfa','#22d3ee']
 
 ━━ LAYOUT ━━
-- html, body { margin:0; padding:0; height:100%; background:transparent; }  ← height:100% is REQUIRED
+- html, body { margin:0; padding:0; height:100%; overflow:hidden; background:transparent; }  ← both height:100% and overflow:hidden are REQUIRED
 - Chart div: width:100%; height:100%;  (inherits iframe height this way)
 - Never use position:fixed.
 
@@ -59,12 +59,16 @@ Pie:  radius:['48%','68%'], labelLine:{show:false} — use legend instead of lab
 
 ━━ FORBIDDEN ━━
 ✗ No gradients (no LinearGradient, no CSS gradient)
-✗ No shadows (shadowBlur, shadowColor, box-shadow)
-✗ No background colors — always transparent
+✗ No shadows (shadowBlur, shadowColor, box-shadow, text-shadow)
+✗ No background on ANY element — html/body/div/card/container must all stay transparent or unset
+✗ No border on wrapper divs — no .card, .container, .chart-container, .stat-card style wrappers with background or border
+✗ No decorative border-radius on wrapper elements
 ✗ No emoji
 ✗ No HTML comments
 ✗ No axis border lines (axisLine must be hidden)
 ✗ No area fill on line charts by default
+✗ No custom font stacks — only system-ui, sans-serif
+✗ Do not use brand colors (e.g. #76b900 for NVIDIA, #0071c5 for Intel) — always use the palette above
 """
 
 
