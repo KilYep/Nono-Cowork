@@ -26,8 +26,8 @@ const T = {
 ['#6366f1','#34d399','#fbbf24','#f87171','#a78bfa','#22d3ee']
 
 ━━ LAYOUT ━━
-- html, body { margin:0; padding:0; background:transparent; }
-- Chart div must fill 100% width and height of body.
+- html, body { margin:0; padding:0; height:100%; background:transparent; }  ← height:100% is REQUIRED
+- Chart div: width:100%; height:100%;  (inherits iframe height this way)
 - Never use position:fixed.
 
 ━━ ECHARTS BASE CONFIG (apply to every chart) ━━
