@@ -1,4 +1,4 @@
-import { useState, useCallback, useRef, useEffect, Component } from "react";
+import { useState, useCallback, useRef, useEffect, useLayoutEffect, useMemo, memo, Component } from "react";
 import type { ErrorInfo, ReactNode } from "react";
 import { Toaster, toast } from "sonner";
 
@@ -591,7 +591,7 @@ function AttachmentPreview() {
   );
 }
 
-function PartsRenderer({
+const PartsRenderer = memo(function PartsRenderer({
   parts,
   isActive,
   isStreaming,
@@ -839,7 +839,7 @@ function PartsRenderer({
   flushContainer(true);
 
   return <div className="flex flex-col gap-1 w-full">{output}</div>;
-}
+});
 
 // ── App ──
 
@@ -854,6 +854,9 @@ function App() {
     keyName: string; serviceName: string; serviceDescription: string;
   } | null>(null);
   const [loadingSession, setLoadingSession] = useState(false);
+  const INITIAL_VISIBLE = 40;
+  const LOAD_MORE_BATCH = 25;
+  const [visibleCount, setVisibleCount] = useState(INITIAL_VISIBLE);
   const [statusText, setStatusText] = useState("");
   const [sessionStatus, setSessionStatus] = useState<SessionStatus>({
     active: false,
@@ -916,6 +919,17 @@ function App() {
     workspaceList.find((w) => w.is_default) ||
     null;
   const [availableModels, setAvailableModels] = useState<AvailableModels>([]);
+  const groupedModels = useMemo(() =>
+    Object.entries(
+      availableModels.reduce<Record<string, ModelInfo[]>>((groups, m) => {
+        const key = m.provider || "other";
+        if (!groups[key]) groups[key] = [];
+        groups[key].push(m);
+        return groups;
+      }, {})
+    ),
+    [availableModels]
+  );
   const [modelSelectorOpen, setModelSelectorOpen] = useState(false);
   // Track whether a stop request has been sent (for immediate UI feedback)
   const [isStopping, setIsStopping] = useState(false);
@@ -1032,6 +1046,25 @@ function App() {
     }
   }, []);
 
+  // Reset visible window whenever the message list is cleared (session switch / new chat)
+  useEffect(() => {
+    if (messages.length === 0) setVisibleCount(INITIAL_VISIBLE);
+  }, [messages.length]);
+
+  // Stores scroll state snapshot taken just before a "load more" click
+  const loadMoreScrollSnapshot = useRef<{ scrollHeight: number; scrollTop: number } | null>(null);
+
+  // After visibleCount grows, restore scroll position so the viewport doesn't jump
+  useLayoutEffect(() => {
+    if (!loadMoreScrollSnapshot.current) return;
+    const scrollEl = document.querySelector<HTMLElement>('[role="log"] > div');
+    if (scrollEl) {
+      const { scrollHeight: prevHeight, scrollTop: prevTop } = loadMoreScrollSnapshot.current;
+      scrollEl.scrollTop = prevTop + (scrollEl.scrollHeight - prevHeight);
+    }
+    loadMoreScrollSnapshot.current = null;
+  }, [visibleCount]);
+
   const statusRefreshTimers = useRef<number[]>([]);
 
   useEffect(() => {
@@ -1045,7 +1078,7 @@ function App() {
     statusRefreshTimers.current.forEach((id) => window.clearTimeout(id));
     statusRefreshTimers.current = [];
 
-    [2000, 5000, 9000, 14000, 20000].forEach((delayMs) => {
+    [2000, 8000].forEach((delayMs) => {
       const timeoutId = window.setTimeout(() => {
         void refreshStatus();
       }, delayMs);
@@ -1463,6 +1496,23 @@ function App() {
       });
     };
 
+    // Batch streaming text/reasoning renders to once per animation frame
+    let pendingRafId: number | null = null;
+    const scheduleRafUpdate = () => {
+      if (pendingRafId !== null) return;
+      pendingRafId = requestAnimationFrame(() => {
+        pendingRafId = null;
+        updateMsg({ content: assistantContent, parts: [...currentParts] });
+      });
+    };
+    const flushRafUpdate = () => {
+      if (pendingRafId !== null) {
+        cancelAnimationFrame(pendingRafId);
+        pendingRafId = null;
+        updateMsg({ content: assistantContent, parts: [...currentParts] });
+      }
+    };
+
     try {
       // Build request body — include images when present
       const chatBody: Record<string, unknown> = { message: text || "(see attached images)" };
@@ -1521,7 +1571,7 @@ function App() {
                   currentParts.push({ type: "reasoning", content: data.content || "" });
                 }
                 setThinkingMsgId(assistantId);
-                updateMsg({ parts: [...currentParts] });
+                scheduleRafUpdate();
               } else if (eventType === "text_chunk") {
                 // Append to last text part, or create new one
                 const lastPart = currentParts[currentParts.length - 1];
@@ -1532,7 +1582,7 @@ function App() {
                 }
                 assistantContent += (data.content || "");
                 setAnimatingMsgId(assistantId);
-                updateMsg({ content: assistantContent, parts: [...currentParts] });
+                scheduleRafUpdate();
               } else if (eventType === "thought") {
                 // Tool events: push in order
                 currentParts.push({
@@ -1585,6 +1635,7 @@ function App() {
         }
       }
     } catch (err) {
+      flushRafUpdate();
       // Show error as assistant message (rendered as red banner + retry)
       setMessages((prev) => [
         ...prev,
@@ -1596,6 +1647,7 @@ function App() {
         },
       ]);
     } finally {
+      flushRafUpdate();
       setIsStreaming(false);
       setIsStopping(false);
       setPendingAskUser(null);
@@ -1897,14 +1949,7 @@ function App() {
                             <ModelSelectorInput placeholder="Search models..." />
                             <ModelSelectorList>
                               <ModelSelectorEmpty>No models found.</ModelSelectorEmpty>
-                              {Object.entries(
-                                availableModels.reduce<Record<string, ModelInfo[]>>((groups, m) => {
-                                  const key = m.provider || 'other';
-                                  if (!groups[key]) groups[key] = [];
-                                  groups[key].push(m);
-                                  return groups;
-                                }, {})
-                              ).map(([provider, models]) => (
+                              {groupedModels.map(([provider, models]) => (
                                 <ModelSelectorGroup key={provider} heading={displayProvider(provider)}>
                                   {models.map((m) => {
                                     const isCurrent = m.id === sessionStatus.model;
@@ -1982,20 +2027,40 @@ function App() {
                         </div>
                       </div>
                     )}
+                    {messages.length > visibleCount && (
+                      <div className="flex justify-center py-3">
+                        <button
+                          className="text-xs text-muted-foreground hover:text-foreground transition-colors px-3 py-1.5 rounded-md hover:bg-muted/50"
+                          onClick={() => {
+                            const scrollEl = document.querySelector<HTMLElement>('[role="log"] > div');
+                            if (scrollEl) {
+                              loadMoreScrollSnapshot.current = {
+                                scrollHeight: scrollEl.scrollHeight,
+                                scrollTop: scrollEl.scrollTop,
+                              };
+                            }
+                            setVisibleCount((c) => Math.min(c + LOAD_MORE_BATCH, messages.length));
+                          }}
+                        >
+                          ↑ Load earlier messages ({messages.length - visibleCount} more)
+                        </button>
+                      </div>
+                    )}
                     {(() => {
                       // ── Pre-compute turn boundaries ──
                       // A "turn" = a user message + all following assistant messages (until next user msg)
                       // We render deliverables at the end of each completed turn.
+                      const visibleMessages = messages.slice(-visibleCount);
                       const turnEnds: Set<number> = new Set();
-                      for (let k = 0; k < messages.length; k++) {
-                        if (messages[k].role === "user" && k > 0) {
+                      for (let k = 0; k < visibleMessages.length; k++) {
+                        if (visibleMessages[k].role === "user" && k > 0) {
                           // The previous message was the end of a turn
                           turnEnds.add(k - 1);
                         }
                       }
                       // Last message is also a turn end (if not streaming)
-                      if (messages.length > 0 && !isStreaming) {
-                        turnEnds.add(messages.length - 1);
+                      if (visibleMessages.length > 0 && !isStreaming) {
+                        turnEnds.add(visibleMessages.length - 1);
                       }
 
                       // Collect deliverables for a range of messages [start..end]
@@ -2004,7 +2069,7 @@ function App() {
                         const reportDelivs: Array<Record<string, unknown>> = [];
 
                         for (let m = start; m <= end; m++) {
-                          const msg = messages[m];
+                          const msg = visibleMessages[m];
                           if (msg.role !== "assistant" || !msg.parts) continue;
                           for (let j = 0; j < msg.parts.length; j++) {
                             const p = msg.parts[j];
@@ -2035,7 +2100,7 @@ function App() {
                       const output: React.ReactNode[] = [];
                       let turnStart = 0;
 
-                      messages.forEach((msg, idx) => {
+                      visibleMessages.forEach((msg, idx) => {
                         // Render the message
                         output.push(
                           <Message key={msg.id} from={msg.role}>
@@ -2262,14 +2327,7 @@ function App() {
                             <ModelSelectorInput placeholder="Search models..." />
                             <ModelSelectorList>
                               <ModelSelectorEmpty>No models found.</ModelSelectorEmpty>
-                              {Object.entries(
-                                availableModels.reduce<Record<string, ModelInfo[]>>((groups, m) => {
-                                  const key = m.provider || 'other';
-                                  if (!groups[key]) groups[key] = [];
-                                  groups[key].push(m);
-                                  return groups;
-                                }, {})
-                              ).map(([provider, models]) => (
+                              {groupedModels.map(([provider, models]) => (
                                 <ModelSelectorGroup key={provider} heading={displayProvider(provider)}>
                                   {models.map((m) => {
                                     const isCurrent = m.id === sessionStatus.model;
