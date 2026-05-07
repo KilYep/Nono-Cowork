@@ -64,6 +64,31 @@ def main():
     )
     logging.getLogger("httpx").setLevel(logging.WARNING)
 
+    # Persist ERROR+ logs to a rotating file (max 2 MB × 3 = 6 MB)
+    import os as _os
+    import datetime as _dt
+    from logging.handlers import RotatingFileHandler as _RFH
+
+    _TZ_CST = _dt.timezone(_dt.timedelta(hours=8))
+
+    class _CSTFormatter(logging.Formatter):
+        """Formatter that always uses Beijing time (UTC+8), regardless of system timezone."""
+        def formatTime(self, record, datefmt=None):
+            ct = _dt.datetime.fromtimestamp(record.created, tz=_TZ_CST)
+            return ct.strftime(datefmt or "%Y-%m-%d %H:%M:%S")
+
+    _log_dir = _os.path.join(_os.path.dirname(_os.path.dirname(_os.path.abspath(__file__))), "logs")
+    _os.makedirs(_log_dir, exist_ok=True)
+    _err_handler = _RFH(
+        _os.path.join(_log_dir, "errors.log"),
+        maxBytes=2 * 1024 * 1024,
+        backupCount=3,
+        encoding="utf-8",
+    )
+    _err_handler.setLevel(logging.ERROR)
+    _err_handler.setFormatter(_CSTFormatter("%(asctime)s [%(levelname)s] %(name)s: %(message)s"))
+    logging.getLogger().addHandler(_err_handler)
+
     recover_orphaned_logs()
     atexit.register(sessions.close_all)
     atexit.register(scheduler.stop)
