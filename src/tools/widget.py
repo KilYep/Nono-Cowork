@@ -12,7 +12,7 @@ _STYLE_GUIDE = """
 WIDGET STYLE GUIDE — follow every rule strictly, no exceptions.
 
 ━━ THEME SETUP (paste this snippet at the top of every <script>) ━━
-const dk = window.matchMedia('(prefers-color-scheme: dark)').matches;
+const dk = window.__dk__ ?? window.matchMedia('(prefers-color-scheme: dark)').matches;
 const T = {
   text:    dk ? '#eef0f5' : '#111827',
   sub:     dk ? '#9ca3af' : '#6b7280',
@@ -23,7 +23,7 @@ const T = {
 };
 
 ━━ COLOR PALETTE (use in order, no substitutions) ━━
-['#6366f1','#34d399','#fbbf24','#f87171','#a78bfa','#22d3ee']
+['#6366f1','#34d399','#fbbf24','#f87171','#fb923c','#22d3ee']
 
 ━━ LAYOUT ━━
 - html, body { margin:0; padding:0; height:100%; overflow:hidden; background:transparent; }  ← both height:100% and overflow:hidden are REQUIRED

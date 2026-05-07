@@ -1644,14 +1644,6 @@ function App() {
                   serviceName: data.service_name,
                   serviceDescription: data.service_description,
                 });
-              } else if (eventType === "widget") {
-                currentParts.push({
-                  type: "widget",
-                  html: data.html || "",
-                  title: data.title || undefined,
-                  height: data.height || 420,
-                });
-                updateMsg({ parts: [...currentParts] });
               } else if (eventType === "reply") {
                 // Backend signals agent-layer failures with a "❌" prefix
                 // (e.g. "❌ Execution error: LLM stream went silent…").
