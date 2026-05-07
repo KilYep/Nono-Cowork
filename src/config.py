@@ -101,6 +101,16 @@ COMPOSIO_EXECUTE_TIMEOUT = int(os.getenv("COMPOSIO_EXECUTE_TIMEOUT", "120"))  # 
 WEBHOOK_PORT = int(os.getenv("WEBHOOK_PORT", "9090"))
 SERVER_HOST = os.getenv("SERVER_HOST", "").strip()  # Public hostname/IP for webhooks
 
+# ── Web Search API Keys ──
+# Tavily: AI-optimized search that returns page content directly (no need for read_webpage).
+# Free tier: 1000 searches/month. Get key at https://tavily.com
+# When configured, becomes the default backend for web_search standard mode.
+TAVILY_API_KEY = os.getenv("TAVILY_API_KEY", "").strip()
+
+# Exa: Neural/semantic search engine. Enables "semantic" and "similar" modes in web_search.
+# Free tier: 1000 searches/month. Get key at https://exa.ai
+EXA_API_KEY = os.getenv("EXA_API_KEY", "").strip()
+
 # ── Jina Reader (webpage rendering fallback) ──
 # Jina Reader renders JS-heavy / SPA pages in a headless browser and returns
 # clean Markdown. Without an API key, the free tier is ~20 RPM per IP.

@@ -10,6 +10,8 @@ from markdownify import markdownify as md
 from ddgs import DDGS
 from tools.registry import tool
 from config import JINA_API_KEY as _ENV_JINA_KEY
+from config import TAVILY_API_KEY as _ENV_TAVILY_KEY
+from config import EXA_API_KEY as _ENV_EXA_KEY
 
 logger = logging.getLogger("tools.web")
 
@@ -273,22 +275,168 @@ def read_webpage(url: str) -> str:
     return f"Webpage content ({url}):\n\n{direct_text}"
 
 
+def _get_tavily_key() -> str:
+    if _ENV_TAVILY_KEY:
+        return _ENV_TAVILY_KEY
+    try:
+        from credential_store import get_credential
+        return get_credential("TAVILY_API_KEY") or ""
+    except Exception:
+        return ""
+
+
+def _get_exa_key() -> str:
+    if _ENV_EXA_KEY:
+        return _ENV_EXA_KEY
+    try:
+        from credential_store import get_credential
+        return get_credential("EXA_API_KEY") or ""
+    except Exception:
+        return ""
+
+
+_NO_EXA_KEY_MSG = (
+    "Exa API key is not configured. "
+    "Use the credential_request tool with key_name='EXA_API_KEY', "
+    "service_name='Exa (Neural Search)', "
+    "service_description='Semantic/neural web search — enables concept-based and find-similar searches.' "
+    "to ask the user for their key. Free tier: 1000 searches/month at https://exa.ai"
+)
+
+
+def _search_tavily(query: str, max_results: int) -> str:
+    from tavily import TavilyClient
+    key = _get_tavily_key()
+    client = TavilyClient(api_key=key)
+    resp = client.search(
+        query,
+        max_results=max_results,
+        include_raw_content=True,
+    )
+    results = resp.get("results", [])
+    if not results:
+        return f"No results found for '{query}'."
+    parts = []
+    for i, r in enumerate(results, 1):
+        content = (r.get("raw_content") or r.get("content") or "").strip()
+        content_block = f"\n    Content:\n{_indent(content[:3000])}" if content else ""
+        parts.append(
+            f"[{i}] {r.get('title', '')}\n"
+            f"    URL: {r.get('url', '')}\n"
+            f"    Score: {r.get('score', 0):.2f}"
+            f"{content_block}"
+        )
+    return "\n\n".join(parts)
+
+
+def _search_exa_text(query: str, max_results: int) -> str:
+    from exa_py import Exa
+    key = _get_exa_key()
+    if not key:
+        return _NO_EXA_KEY_MSG
+    exa = Exa(api_key=key)
+    results = exa.search_and_contents(
+        query,
+        num_results=max_results,
+        highlights=True,
+    )
+    if not results.results:
+        return f"No results found for '{query}'."
+    parts = []
+    for i, r in enumerate(results.results, 1):
+        highlights = ""
+        if r.highlights:
+            joined = "\n".join(f"  - {h}" for h in r.highlights[:3])
+            highlights = f"\n    Highlights:\n{joined}"
+        text = (r.text or "").strip()
+        content_block = f"\n    Content:\n{_indent(text[:3000])}" if text else ""
+        parts.append(
+            f"[{i}] {r.title or ''}\n"
+            f"    URL: {r.url}"
+            f"{highlights}"
+            f"{content_block}"
+        )
+    return "\n\n".join(parts)
+
+
+def _search_exa_similar(url: str, max_results: int) -> str:
+    from exa_py import Exa
+    key = _get_exa_key()
+    if not key:
+        return _NO_EXA_KEY_MSG
+    exa = Exa(api_key=key)
+    results = exa.find_similar_and_contents(
+        url,
+        num_results=max_results,
+        highlights=True,
+    )
+    if not results.results:
+        return f"No similar pages found for '{url}'."
+    parts = []
+    for i, r in enumerate(results.results, 1):
+        highlights = ""
+        if r.highlights:
+            joined = "\n".join(f"  - {h}" for h in r.highlights[:3])
+            highlights = f"\n    Highlights:\n{joined}"
+        parts.append(
+            f"[{i}] {r.title or ''}\n"
+            f"    URL: {r.url}"
+            f"{highlights}"
+        )
+    return "\n\n".join(parts)
+
+
+def _indent(text: str, prefix: str = "    ") -> str:
+    return "\n".join(prefix + line for line in text.splitlines())
+
+
 @tool(
     name="web_search",
     tags=["network", "read"],
     description=(
-        "Search the internet using a search engine. Use this to find documentation, "
-        "tech blogs, error solutions, latest news, release announcements, and general information. "
-        "IMPORTANT: Always prefer English search queries for better result quality and coverage, "
-        "even when the user's question is in another language. "
-        "Use timelimit='w' or 'd' for time-sensitive queries like 'latest news' or 'recent releases'."
+        "Search the internet. Supports three modes — choose based on your task:\n\n"
+        "• standard (default): Keyword search. Uses Tavily (returns full page content) "
+        "when configured, falls back to DuckDuckGo (snippets only) otherwise. "
+        "Best for: documentation, error messages, news, release announcements. "
+        "Use timelimit for time-sensitive queries.\n\n"
+        "• semantic: Neural/concept-based search via Exa. Use when keyword search "
+        "would miss the point — e.g. 'companies building AI-native project management tools' "
+        "or 'blog posts about remote work culture in startups'. Requires EXA_API_KEY.\n\n"
+        "• similar: Find pages similar to a given URL via Exa. Pass the URL in the `url` "
+        "field. Useful for content discovery, finding competitors, or locating related "
+        "resources. Requires EXA_API_KEY.\n\n"
+        "IMPORTANT: Always prefer English queries for higher-quality results, even when "
+        "the user's question is in another language.\n\n"
+        "API key guidance:\n"
+        "• If TAVILY_API_KEY is not configured and the task needs thorough research "
+        "(e.g. deep dive, comparing multiple sources, reading full articles), proactively "
+        "tell the user that Tavily would give significantly better results (full page content "
+        "vs. snippets), and offer to collect the key via credential_request. "
+        "Free tier at https://tavily.com — 1000 searches/month.\n"
+        "• If EXA_API_KEY is missing and the user needs semantic or similar-page search, "
+        "use credential_request to ask for it. Free tier at https://exa.ai — 1000 searches/month."
     ),
     parameters={
         "type": "object",
         "properties": {
             "query": {
                 "type": "string",
-                "description": "Search keywords. Prefer English queries for higher-quality results.",
+                "description": "Search keywords or a natural-language description. Used for 'standard' and 'semantic' modes. Prefer English.",
+            },
+            "mode": {
+                "type": "string",
+                "enum": ["standard", "semantic", "similar"],
+                "description": (
+                    "'standard': keyword search (Tavily if key set, else DuckDuckGo). "
+                    "'semantic': neural concept search via Exa. "
+                    "'similar': find pages similar to a URL via Exa (requires `url` field). "
+                    "Defaults to 'standard'."
+                ),
+                "default": "standard",
+            },
+            "url": {
+                "type": "string",
+                "description": "Target URL for 'similar' mode — find pages similar to this page.",
             },
             "max_results": {
                 "type": "integer",
@@ -298,33 +446,54 @@ def read_webpage(url: str) -> str:
             "timelimit": {
                 "type": "string",
                 "description": (
-                    "Filter results by recency. Use this for time-sensitive queries. "
-                    "Options: 'd' (past day), 'w' (past week), 'm' (past month), 'y' (past year). "
-                    "Omit to get all-time results."
+                    "Filter by recency (standard mode only). "
+                    "'d' = past day, 'w' = past week, 'm' = past month, 'y' = past year."
                 ),
             },
         },
         "required": ["query"],
     },
 )
-def web_search(query: str, max_results: int = 5, timelimit: str | None = None) -> str:
-    """Search the internet for information."""
+def web_search(
+    query: str,
+    mode: str = "standard",
+    url: str | None = None,
+    max_results: int = 5,
+    timelimit: str | None = None,
+) -> str:
+    if mode == "similar":
+        target = url or query
+        try:
+            return _search_exa_similar(target, max_results)
+        except Exception as e:
+            return f"Similar search failed: {e}"
+
+    if mode == "semantic":
+        try:
+            return _search_exa_text(query, max_results)
+        except Exception as e:
+            return f"Semantic search failed: {e}"
+
+    # standard — try Tavily first, fall back to DDGS
+    tavily_key = _get_tavily_key()
+    if tavily_key:
+        try:
+            return _search_tavily(query, max_results)
+        except Exception as e:
+            logger.warning("Tavily search failed, falling back to DDGS: %s", e)
+
     try:
         ddgs = DDGS()
         results = list(ddgs.text(query, max_results=max_results, timelimit=timelimit))
-
         if not results:
             return f"No results found for '{query}'."
-
-        formatted = []
+        parts = []
         for i, r in enumerate(results, 1):
-            formatted.append(
+            parts.append(
                 f"[{i}] {r['title']}\n"
                 f"    URL: {r['href']}\n"
                 f"    Snippet: {r['body']}"
             )
-
-        return "\n\n".join(formatted)
-
+        return "\n\n".join(parts)
     except Exception as e:
-        return f"Search failed: {str(e)}"
+        return f"Search failed: {e}"
