@@ -662,6 +662,23 @@ const PartsRenderer = memo(function PartsRenderer({
         continue;
       }
 
+      // widget_show: render WidgetCard from args (persists across session reloads)
+      if (toolName === "widget_show" && part.args?.html) {
+        flatItems.push({
+          kind: "widget" as any,
+          node: (
+            <WidgetCard
+              key={`widget-${i}`}
+              html={part.args.html as string}
+              title={part.args.title as string | undefined}
+              height={part.args.height as number | undefined}
+            />
+          ),
+        });
+        i = hasResult ? i + 2 : i + 1;
+        continue;
+      }
+
       // Determine tool state
       let toolState: "input-available" | "output-available" | "input-streaming";
       if (hasResult) {
