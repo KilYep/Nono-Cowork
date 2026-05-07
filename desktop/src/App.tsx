@@ -143,6 +143,7 @@ import {
 import { SearchToolCall } from "@/components/ai-elements/search-tool";
 import { AskUserCard } from "@/components/ai-elements/ask-user-card";
 import { CredentialCard } from "@/components/ai-elements/credential-card";
+import { WidgetCard } from "@/components/ai-elements/widget-card";
 import { useScrollAnchor } from "@/components/ai-elements/use-scroll-anchor";
 import { Sidebar, type SessionItem, type SidebarView, type WorkspaceItem } from "@/components/sidebar";
 import { NewWorkspaceDialog } from "@/components/new-workspace-dialog";
@@ -230,7 +231,8 @@ type MessagePart =
   | { type: "text"; content: string }
   | { type: "reasoning"; content: string }
   | { type: "tool_call"; toolName?: string; args?: Record<string, unknown>; round: number; description?: string }
-  | { type: "tool_result"; toolName?: string; result?: string; round: number };
+  | { type: "tool_result"; toolName?: string; result?: string; round: number }
+  | { type: "widget"; html: string; title?: string; height?: number };
 
 interface ChatMessage {
   id: string;
@@ -754,6 +756,22 @@ const PartsRenderer = memo(function PartsRenderer({
       continue;
     }
 
+    if (part.type === "widget") {
+      flatItems.push({
+        kind: "widget" as any,
+        node: (
+          <WidgetCard
+            key={`widget-${i}`}
+            html={part.html}
+            title={part.title}
+            height={part.height}
+          />
+        ),
+      });
+      i++;
+      continue;
+    }
+
     // Skip standalone tool_result
     i++;
   }
@@ -822,7 +840,7 @@ const PartsRenderer = memo(function PartsRenderer({
         // FLAT mode → render reasoning directly
         output.push(item.node);
       }
-    } else if (item.kind === "text") {
+    } else if (item.kind === "text" || (item.kind as string) === "widget") {
       // Content (non-empty) → flush container if exists, then render flat
       flushContainer();
       output.push(item.node);
@@ -1609,6 +1627,14 @@ function App() {
                   serviceName: data.service_name,
                   serviceDescription: data.service_description,
                 });
+              } else if (eventType === "widget") {
+                currentParts.push({
+                  type: "widget",
+                  html: data.html || "",
+                  title: data.title || undefined,
+                  height: data.height || 420,
+                });
+                updateMsg({ parts: [...currentParts] });
               } else if (eventType === "reply") {
                 // Backend signals agent-layer failures with a "❌" prefix
                 // (e.g. "❌ Execution error: LLM stream went silent…").

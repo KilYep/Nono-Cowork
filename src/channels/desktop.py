@@ -120,6 +120,14 @@ class DesktopChannel(Channel):
             evt.set()
             return True
 
+    def show_widget(self, html: str, title: str = "", height: int = 420):
+        """Push a widget SSE event — non-blocking, fire-and-forget."""
+        self._push_event(DESKTOP_USER_ID, "widget", {
+            "html": html,
+            "title": title,
+            "height": height,
+        })
+
     def credential_request(self, key_name: str, service_name: str, service_description: str) -> str:
         """Block the agent thread, push credential request via SSE, wait for user input."""
         user_id = DESKTOP_USER_ID
