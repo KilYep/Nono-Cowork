@@ -421,7 +421,7 @@ def _indent(text: str, prefix: str = "    ") -> str:
         "properties": {
             "query": {
                 "type": "string",
-                "description": "Search keywords or a natural-language description. Used for 'standard' and 'semantic' modes. Prefer English.",
+                "description": "Search keywords or a natural-language description. Required for 'standard' and 'semantic' modes. Not needed for 'similar' mode. Prefer English.",
             },
             "mode": {
                 "type": "string",
@@ -451,11 +451,11 @@ def _indent(text: str, prefix: str = "    ") -> str:
                 ),
             },
         },
-        "required": ["query"],
+        "required": [],
     },
 )
 def web_search(
-    query: str,
+    query: str = "",
     mode: str = "standard",
     url: str | None = None,
     max_results: int = 5,
@@ -469,12 +469,16 @@ def web_search(
             return f"Similar search failed: {e}"
 
     if mode == "semantic":
+        if not query:
+            return "semantic mode requires a 'query' parameter."
         try:
             return _search_exa_text(query, max_results)
         except Exception as e:
             return f"Semantic search failed: {e}"
 
     # standard — try Tavily first, fall back to DDGS
+    if not query:
+        return "standard and semantic modes require a 'query' parameter."
     tavily_key = _get_tavily_key()
     if tavily_key:
         try:
